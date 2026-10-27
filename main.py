@@ -23,9 +23,12 @@ if sys.platform == "win32":
 from ghostshell import __version__
 from ghostshell.client import GemmaClient
 from ghostshell.commands import CommandAction, CommandHandler
-from ghostshell.config import GhostConfig, enable_windows_virtual_terminal, get_default_config
+from ghostshell.config import GhostConfig, enable_windows_virtual_terminal, get_default_config, is_local_endpoint
 from ghostshell.debugger import JavaDebugger, JavaDebugRequest
 from ghostshell.engine import BaseEngine, GemmaEngine, PlaceholderEngine
+from ghostshell.git_intel import GitIntelligence
+from ghostshell.memory import GhostMemory
+from ghostshell.persona import PersonaEngine
 from ghostshell.ui import GhostUI
 
 
@@ -47,7 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-v", "--version",
         action="version",
-        version=f"GhostShell v{__version__} (Phase 3 - Possessed Java Debugger)",
+        version=f"GhostShell v{__version__} (Phase 3-7 Master v1.0 - Possessed Java & Git Intelligence)",
     )
     parser.add_argument(
         "--diagnostics",
@@ -70,6 +73,25 @@ def parse_args() -> argparse.Namespace:
         "--placeholder",
         action="store_true",
         help="Force Phase 1 standalone UI development placeholder mode.",
+    )
+    parser.add_argument(
+        "--no-memory",
+        action="store_true",
+        help="Disable private local conversation memory persistence.",
+    )
+    parser.add_argument(
+        "--persona",
+        type=str,
+        default=None,
+        choices=["archivist", "poltergeist", "grim-debugger"],
+        help="Set initial ghost personality archetype (default: grim-debugger).",
+    )
+    parser.add_argument(
+        "--theme",
+        type=str,
+        default=None,
+        choices=["green", "amber", "cyan", "monochrome"],
+        help="Set initial phosphor color theme (default: green).",
     )
     return parser.parse_args()
 
@@ -186,6 +208,27 @@ def run_repl(
                         debug_res = active_debugger.analyze(req)
                     ui.render_java_debug_result(debug_res)
 
+                elif payload_type == "git_commits":
+                    ui.render_git_commits(result.data["commits"])
+
+                elif payload_type == "git_story":
+                    ui.render_git_story(result.data["result"])
+
+                elif payload_type == "git_review":
+                    ui.render_git_review(result.data["result"])
+
+                elif payload_type == "memory_history":
+                    ui.render_memory_history(result.data["entries"])
+
+                elif payload_type == "storage_diagnostics":
+                    ui.render_storage_diagnostics(result.data["info"])
+
+                elif payload_type == "persona_status":
+                    ui.render_persona_status(result.data["current"], result.data["all"])
+
+                elif payload_type == "theme_changed":
+                    ui.render_theme_changed(result.data["theme"])
+
                 else:
                     if result.message:
                         ui.console.print(result.message)
@@ -232,6 +275,33 @@ def main() -> int:
         config.model_name = args.model
     if args.placeholder:
         config.force_placeholder = True
+    if args.no_memory:
+        config.memory_enabled = False
+    if args.persona:
+        config.active_persona = args.persona
+    if args.theme:
+        config.active_theme = args.theme
+
+    # Setup subsystems
+    memory = GhostMemory(
+        data_dir=config.data_dir,
+        enabled=config.memory_enabled,
+    )
+    persona_engine = PersonaEngine(
+        default_persona=config.active_persona,
+        default_theme=config.active_theme,
+    )
+
+    # Restore saved persona/theme preferences if available
+    saved_persona = memory.get_preference("persona")
+    if saved_persona and not args.persona:
+        persona_engine.set_persona(saved_persona)
+
+    saved_theme = memory.get_preference("theme")
+    if saved_theme and not args.theme:
+        persona_engine.set_theme(saved_theme)
+
+    git_intel = GitIntelligence()
 
     # Setup client and engines
     client = GemmaClient(
@@ -243,11 +313,26 @@ def main() -> int:
     if config.force_placeholder:
         engine: BaseEngine = PlaceholderEngine()
     else:
-        engine = GemmaEngine(client=client, config=config)
+        engine = GemmaEngine(
+            client=client,
+            config=config,
+            persona_engine=persona_engine,
+            memory=memory,
+        )
 
     debugger = JavaDebugger(client=client, config=config)
     ui = GhostUI(config=config)
-    handler = CommandHandler(config=config, client=client)
+    handler = CommandHandler(
+        config=config,
+        client=client,
+        git_intel=git_intel,
+        memory=memory,
+        persona_engine=persona_engine,
+    )
+
+    # Warn if endpoint is not local
+    if not is_local_endpoint(config.model_endpoint):
+        ui.render_non_local_warning(config.model_endpoint)
 
     if args.diagnostics:
         status_res = handler.execute("/status")

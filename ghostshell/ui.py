@@ -35,6 +35,9 @@ from ghostshell.config import (
     create_console,
 )
 from ghostshell.engine import GhostResponse
+from ghostshell.git_intel import GitCommit, GitReviewResult, GitStoryResult, GitWorkingTreeStatus
+from ghostshell.memory import MemoryEntry
+from ghostshell.persona import GhostPersona, GhostThemeColors
 
 # ASCII Art for Ghost and GhostShell Banner
 GHOST_ART = r"""
@@ -748,6 +751,314 @@ class GhostUI:
             Text.from_markup(goodbye_text),
             box=box.ROUNDED,
             border_style=PHANTOM_DIM,
+            padding=(1, 2),
+            expand=True,
+            safe_box=True,
+        )
+        self.console.print(panel)
+        self.console.print()
+
+    # --- Phase 4 Git Intelligence UI Renderers ---
+
+    def render_git_commits(self, commits: list[GitCommit]) -> None:
+        """Render recent Git commits table.
+
+        Args:
+            commits: List of GitCommit objects.
+        """
+        if not commits:
+            self.render_error("No Git commits found or working directory is not a Git repository.")
+            return
+
+        table = Table(
+            box=box.SIMPLE_HEAVY,
+            border_style=PHOSPHOR_GREEN,
+            header_style=f"bold {SPECTRAL_CYAN}",
+            padding=(0, 1),
+            expand=True,
+        )
+        table.add_column("Hash", style=f"bold {SPECTRAL_CYAN}", no_wrap=True)
+        table.add_column("When", style=f"{PHANTOM_DIM}", no_wrap=True)
+        table.add_column("Author", style=f"bold {PHOSPHOR_GREEN}", no_wrap=True)
+        table.add_column("Incantation / Message", style=f"{GHOST_MIST}")
+
+        for c in commits:
+            table.add_row(c.hash, c.date, c.author, c.message)
+
+        panel = Panel(
+            table,
+            box=box.DOUBLE,
+            border_style=PHOSPHOR_GREEN,
+            title=f"[bold {PHOSPHOR_BRIGHT}]📜 MACHINE MEMORY — RECENT GIT COMMITS[/]",
+            subtitle=f"[{PHANTOM_DIM}]Read-only inspection ({len(commits)} commits)[/]",
+            padding=(1, 1),
+            expand=True,
+            safe_box=True,
+        )
+        self.console.print(panel)
+        self.console.print()
+
+    def render_working_tree_status(self, status: GitWorkingTreeStatus) -> None:
+        """Render Git working tree status.
+
+        Args:
+            status: GitWorkingTreeStatus instance.
+        """
+        if not status.is_repo:
+            self.render_error("Working directory is not inside a Git repository.")
+            return
+
+        clean_badge = (
+            f"[bold {PHOSPHOR_BRIGHT}]✔ IMMACULATE (CLEAN)[/]"
+            if status.is_clean
+            else f"[bold {ECTO_AMBER}]⚠ RESTLESS (UNCOMMITTED CHANGES)[/]"
+        )
+
+        elements: list[Any] = [
+            Text.from_markup(f"[bold {SPECTRAL_CYAN}]Branch:[/] [bold {PHOSPHOR_BRIGHT}]{status.branch}[/]"),
+            Text.from_markup(f"[bold {SPECTRAL_CYAN}]Tree State:[/] {clean_badge}"),
+        ]
+
+        if status.staged_files:
+            elements.append(Text(""))
+            elements.append(Text.from_markup(f"[bold {PHOSPHOR_GREEN}]Staged Rites ({len(status.staged_files)}):[/]"))
+            for f in status.staged_files:
+                elements.append(Text(f"  + {f}", style=f"bold {PHOSPHOR_GREEN}"))
+
+        if status.unstaged_files:
+            elements.append(Text(""))
+            elements.append(Text.from_markup(f"[bold {ECTO_AMBER}]Modified Files ({len(status.unstaged_files)}):[/]"))
+            for f in status.unstaged_files:
+                elements.append(Text(f"  * {f}", style=f"bold {ECTO_AMBER}"))
+
+        if status.untracked_files:
+            elements.append(Text(""))
+            elements.append(Text.from_markup(f"[bold {CRIMSON_GLITCH}]Untracked Apparitions ({len(status.untracked_files)}):[/]"))
+            for f in status.untracked_files:
+                elements.append(Text(f"  ? {f}", style=f"dim {CRIMSON_GLITCH}"))
+
+        panel = Panel(
+            Group(*elements),
+            box=box.DOUBLE,
+            border_style=PHOSPHOR_GREEN,
+            title=f"[bold {PHOSPHOR_BRIGHT}]🔮 REPOSITORY & WORKING TREE STATUS[/]",
+            subtitle=f"[{PHANTOM_DIM}]Branch: {status.branch}[/]",
+            padding=(1, 2),
+            expand=True,
+            safe_box=True,
+        )
+        self.console.print(panel)
+        self.console.print()
+
+    def render_git_story(self, result: GitStoryResult) -> None:
+        """Render the spooky story generated from real Git commit history.
+
+        Args:
+            result: GitStoryResult instance.
+        """
+        badge = (
+            f"[bold {PHOSPHOR_BRIGHT}]Local Gemma Inference ({round(result.latency_ms, 1)} ms)[/]"
+            if result.mode == "GEMMA_LOCAL"
+            else f"[{ECTO_AMBER}]Grounded Offline Synthesis[/]"
+        )
+
+        panel = Panel(
+            Markdown(result.story),
+            box=box.ROUNDED,
+            border_style=SPECTRAL_CYAN,
+            title=f"[bold {PHOSPHOR_BRIGHT}]👻 THE MACHINE'S CHRONICLE (GIT LORE)[/]",
+            subtitle=f"[{PHANTOM_DIM}]Grounded in {len(result.commits_used)} real commits • {badge}[/]",
+            padding=(1, 2),
+            expand=True,
+            safe_box=True,
+        )
+        self.console.print(panel)
+        self.console.print()
+
+    def render_git_review(self, result: GitReviewResult) -> None:
+        """Render high-level development activity review.
+
+        Args:
+            result: GitReviewResult instance.
+        """
+        footer = Text.assemble(
+            ("🛡️ ", f"bold {ECTO_AMBER}"),
+            (result.grounded_disclaimer, f"dim {GHOST_MIST}"),
+        )
+        panel = Panel(
+            Group(Markdown(result.review), Text(""), footer),
+            box=box.ROUNDED,
+            border_style=PHOSPHOR_GREEN,
+            title=f"[bold {PHOSPHOR_BRIGHT}]🛡️ SPECTRAL ACTIVITY REVIEW[/]",
+            subtitle=f"[{PHANTOM_DIM}]{result.commits_analyzed} commits inspected • Tree: {'Clean' if result.working_tree_clean else 'Dirty'}[/]",
+            padding=(1, 2),
+            expand=True,
+            safe_box=True,
+        )
+        self.console.print(panel)
+        self.console.print()
+
+    # --- Phase 5 Local Memory UI Renderers ---
+
+    def render_memory_history(self, entries: list[MemoryEntry]) -> None:
+        """Render recent conversation history from private local memory.
+
+        Args:
+            entries: List of MemoryEntry items.
+        """
+        if not entries:
+            self.console.print(
+                f"[{PHANTOM_DIM}]Local conversation memory is empty. Inscribe queries to build machine memory.[/]\n"
+            )
+            return
+
+        elements: list[Any] = []
+        for e in entries:
+            if e.role == "user":
+                elements.append(
+                    Text.from_markup(f"[bold {SPECTRAL_CYAN}]Mortal ›[/] [bold {GHOST_MIST}]{e.content}[/]")
+                )
+            else:
+                summary = e.content[:180] + ("..." if len(e.content) > 180 else "")
+                elements.append(
+                    Text.from_markup(f"[bold {PHOSPHOR_GREEN}]Ghost  ›[/] [{PHOSPHOR_GREEN}]{summary}[/]")
+                )
+                elements.append(Text(""))
+
+        panel = Panel(
+            Group(*elements),
+            box=box.ROUNDED,
+            border_style=SPECTRAL_CYAN,
+            title=f"[bold {PHOSPHOR_BRIGHT}]🧠 PRIVATE LOCAL CONVERSATION MEMORY[/]",
+            subtitle=f"[{PHANTOM_DIM}]Showing {len(entries)} stored entries • Plain JSON (Local Only)[/]",
+            padding=(1, 2),
+            expand=True,
+            safe_box=True,
+        )
+        self.console.print(panel)
+        self.console.print()
+
+    def render_storage_diagnostics(self, info: dict[str, Any]) -> None:
+        """Render storage diagnostics and privacy disclosure.
+
+        Args:
+            info: Dictionary from GhostMemory.get_storage_diagnostics().
+        """
+        table = Table(
+            box=box.SIMPLE_HEAVY,
+            border_style=SPECTRAL_CYAN,
+            header_style=f"bold {PHOSPHOR_BRIGHT}",
+            padding=(0, 2),
+            expand=True,
+        )
+        table.add_column("Storage Metric", style=f"bold {SPECTRAL_CYAN}", ratio=1, no_wrap=True)
+        table.add_column("Disclosure & Setting", style=f"{GHOST_MIST}", ratio=2)
+
+        for key, val in info.items():
+            table.add_row(key.replace("_", " ").title(), str(val))
+
+        panel = Panel(
+            table,
+            box=box.DOUBLE,
+            border_style=SPECTRAL_CYAN,
+            title=f"[bold {PHOSPHOR_BRIGHT}]💾 LOCAL STORAGE & PRIVACY DISCLOSURE[/]",
+            subtitle=f"[{PHANTOM_DIM}]Zero Cloud Telemetry • Stored strictly on local machine[/]",
+            padding=(1, 1),
+            expand=True,
+            safe_box=True,
+        )
+        self.console.print(panel)
+        self.console.print()
+
+    # --- Phase 6 Persona UI Renderers ---
+
+    def render_persona_status(
+        self, current: GhostPersona, all_personas: dict[str, GhostPersona]
+    ) -> None:
+        """Display current ghost personality and available archetypes.
+
+        Args:
+            current: Active GhostPersona instance.
+            all_personas: Dict of all registered GhostPersona instances.
+        """
+        table = Table(
+            box=box.ROUNDED,
+            border_style=PHOSPHOR_GREEN,
+            header_style=f"bold {SPECTRAL_CYAN}",
+            padding=(0, 1),
+            expand=True,
+        )
+        table.add_column("Persona", style=f"bold {PHOSPHOR_BRIGHT}", no_wrap=True)
+        table.add_column("Title & Tagline", style=f"{GHOST_MIST}")
+        table.add_column("Active", justify="center", no_wrap=True)
+
+        for name, p in all_personas.items():
+            is_active = (name == current.name)
+            badge = f"[bold {PHOSPHOR_BRIGHT}]✔ ACTIVE[/]" if is_active else f"[{PHANTOM_DIM}]available[/]"
+            desc = f"[bold]{p.title}:[/] {p.tagline}"
+            table.add_row(f"/{name}", desc, badge)
+
+        panel = Panel(
+            Group(
+                Text.from_markup(f"[bold {SPECTRAL_CYAN}]Active Persona:[/] [bold {PHOSPHOR_BRIGHT}]{current.title}[/]"),
+                Text.from_markup(f"[bold {SPECTRAL_CYAN}]Tone Guide:[/] [{GHOST_MIST}]{current.tone_description}[/]"),
+                Text(""),
+                table,
+                Text(""),
+                Text.from_markup(
+                    f"[{PHANTOM_DIM}]Switch at any time: type [bold #00F0FF]/persona <name>[/] (e.g. /persona poltergeist)[/]"
+                ),
+            ),
+            box=box.DOUBLE,
+            border_style=PHOSPHOR_GREEN,
+            title=f"[bold {PHOSPHOR_BRIGHT}]🎭 GHOST PERSONALITY MATRIX[/]",
+            subtitle=f"[{PHANTOM_DIM}]Active: {current.name}[/]",
+            padding=(1, 2),
+            expand=True,
+            safe_box=True,
+        )
+        self.console.print(panel)
+        self.console.print()
+
+    def render_theme_changed(self, theme_name: str) -> None:
+        """Render theme changed confirmation.
+
+        Args:
+            theme_name: Name of newly activated theme.
+        """
+        panel = Panel(
+            Text.from_markup(
+                f"[bold {PHOSPHOR_BRIGHT}]Spectral palette shifted to [bold #00F0FF]{theme_name}[/bold #00F0FF].[/]\n"
+                f"[{PHANTOM_DIM}]Available themes: green, amber, cyan, monochrome.[/]"
+            ),
+            box=box.ROUNDED,
+            border_style=PHOSPHOR_GREEN,
+            padding=(1, 2),
+            expand=True,
+            safe_box=True,
+        )
+        self.console.print(panel)
+        self.console.print()
+
+    def render_non_local_warning(self, endpoint: str) -> None:
+        """Render prominent security warning when a non-local endpoint is used.
+
+        Args:
+            endpoint: The configured non-local model URL.
+        """
+        msg = (
+            f"[bold {CRIMSON_GLITCH}]⚠ CAUTION: NON-LOCAL MODEL ENDPOINT DETECTED[/bold {CRIMSON_GLITCH}]\n\n"
+            f"[bold {ECTO_AMBER}]Target:[/] {endpoint}\n"
+            f"[bold {GHOST_MIST}]GhostShell is engineered as a local-first assistant. "
+            f"Because this endpoint does not point to localhost (127.0.0.1), prompts and code snippets "
+            f"will be transmitted over the network to an external server.\n"
+            f"Ensure you trust this destination before submitting proprietary source code.[/]"
+        )
+        panel = Panel(
+            Text.from_markup(msg),
+            box=box.HEAVY,
+            border_style=CRIMSON_GLITCH,
+            title=f"[bold {CRIMSON_GLITCH}]EXTERNAL NETWORK NOTICE[/]",
             padding=(1, 2),
             expand=True,
             safe_box=True,

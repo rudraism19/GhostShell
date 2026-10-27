@@ -10,6 +10,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from typing import Final
+from urllib.parse import urlparse
 
 from rich.console import Console
 from rich.theme import Theme
@@ -38,7 +39,7 @@ DARK_BG: Final[str] = "#0A100A"              # Deep void background
 
 
 # ==============================================================================
-# Default Model Settings (Phase 3 - Local Gemma 3 1B via llama.cpp)
+# Default Model Settings (Phase 4-7 - Local Gemma 3 1B via llama.cpp)
 # ==============================================================================
 DEFAULT_MODEL_ENDPOINT: Final[str] = "http://127.0.0.1:9931/v1/chat/completions"
 DEFAULT_MODEL_NAME: Final[str] = "gemma-3-1b-it"
@@ -49,6 +50,25 @@ DEFAULT_SYSTEM_PROMPT: Final[str] = (
     "concise, accurate programming guidance laced with eerie, supernatural wit. "
     "Never suggest harmful actions. Always keep code solutions clean, modern, and practical."
 )
+
+
+def is_local_endpoint(url: str) -> bool:
+    """Determine whether an endpoint URL points to a local machine address.
+
+    Protects user privacy by validating that model inference remains on-device.
+
+    Args:
+        url: Full HTTP/HTTPS endpoint URL.
+
+    Returns:
+        True if hostname is local (127.0.0.1, localhost, 0.0.0.0, ::1).
+    """
+    try:
+        parsed = urlparse(url)
+        hostname = (parsed.hostname or "").lower()
+        return hostname in ("127.0.0.1", "localhost", "0.0.0.0", "::1", "")
+    except Exception:
+        return False
 
 
 # ==============================================================================
@@ -92,7 +112,7 @@ class GhostConfig:
     """
 
     app_name: str = "GhostShell"
-    version: str = "0.3.0"
+    version: str = "1.0.0"
     tagline: str = "The Ghost in the Machine — Possessed Local-First AI Developer Assistant"
     startup_animation: bool = True
     animation_speed: float = 0.03
@@ -102,6 +122,11 @@ class GhostConfig:
     model_timeout: float = DEFAULT_MODEL_TIMEOUT
     model_system_prompt: str = DEFAULT_SYSTEM_PROMPT
     force_placeholder: bool = False
+    memory_enabled: bool = True
+    data_dir: str | None = None
+    active_persona: str = "grim-debugger"
+    active_theme: str = "green"
+    debug_max_tokens: int = 600
     allow_command_execution: bool = field(init=False, default=ALLOW_COMMAND_EXECUTION)
 
     def __setattr__(self, name: str, value: object) -> None:
@@ -120,6 +145,13 @@ def get_default_config() -> GhostConfig:
     model_name = os.environ.get("GHOSTSHELL_MODEL_NAME", DEFAULT_MODEL_NAME)
     force_placeholder = os.environ.get("GHOSTSHELL_PLACEHOLDER", "").lower() in ("1", "true", "yes")
 
+    mem_env = os.environ.get("GHOSTSHELL_MEMORY_ENABLED", "").lower()
+    memory_enabled = mem_env not in ("0", "false", "no", "off")
+
+    data_dir = os.environ.get("GHOSTSHELL_DATA_DIR")
+    persona = os.environ.get("GHOSTSHELL_PERSONA", "grim-debugger")
+    theme = os.environ.get("GHOSTSHELL_THEME", "green")
+
     try:
         timeout = float(os.environ.get("GHOSTSHELL_MODEL_TIMEOUT", str(DEFAULT_MODEL_TIMEOUT)))
     except ValueError:
@@ -131,6 +163,10 @@ def get_default_config() -> GhostConfig:
         model_name=model_name,
         model_timeout=timeout,
         force_placeholder=force_placeholder,
+        memory_enabled=memory_enabled,
+        data_dir=data_dir,
+        active_persona=persona,
+        active_theme=theme,
     )
 
 

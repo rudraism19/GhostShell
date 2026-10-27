@@ -23,7 +23,7 @@ def test_default_config() -> None:
     """Verify default configuration attributes and security settings."""
     config = get_default_config()
     assert config.app_name == "GhostShell"
-    assert config.version == "0.3.0"
+    assert config.version == "1.0.0"
     assert config.allow_command_execution is False
     assert config.startup_animation is True
     assert config.model_endpoint == "http://127.0.0.1:9931/v1/chat/completions"

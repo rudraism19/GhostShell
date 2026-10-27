@@ -157,3 +157,69 @@ def test_prompt_multiline_input_cancel(ui: GhostUI) -> None:
     with patch.object(ui.console, "input", side_effect=["class Broken {", ":cancel"]):
         text = ui.prompt_multiline_input("Code", "Type :done")
     assert text is None
+
+
+def test_render_git_commits(ui: GhostUI, mock_console: Console) -> None:
+    """Verify rendering of Git commit table."""
+    from ghostshell.git_intel import GitCommit
+    commits = [
+        GitCommit(hash="a17108a", author="GhostDev", date="1 hour ago", message="Fix broken loop"),
+    ]
+    ui.render_git_commits(commits)
+    output = mock_console.export_text()
+    assert "RECENT GIT COMMITS" in output
+    assert "a17108a" in output
+    assert "GhostDev" in output
+    assert "Fix broken loop" in output
+
+
+def test_render_working_tree_status(ui: GhostUI, mock_console: Console) -> None:
+    """Verify rendering of Git working tree status."""
+    from ghostshell.git_intel import GitWorkingTreeStatus
+    status = GitWorkingTreeStatus(
+        is_repo=True,
+        branch="main",
+        staged_files=["file1.py"],
+        unstaged_files=["file2.py"],
+        untracked_files=["new.py"],
+        is_clean=False,
+    )
+    ui.render_working_tree_status(status)
+    output = mock_console.export_text()
+    assert "REPOSITORY & WORKING TREE STATUS" in output
+    assert "main" in output
+    assert "RESTLESS" in output
+    assert "file1.py" in output
+
+
+def test_render_memory_history(ui: GhostUI, mock_console: Console) -> None:
+    """Verify rendering of conversation history turns."""
+    from ghostshell.memory import MemoryEntry
+    entries = [
+        MemoryEntry(timestamp=100.0, role="user", content="Hello machine ghost"),
+        MemoryEntry(timestamp=101.0, role="assistant", content="Greetings mortal"),
+    ]
+    ui.render_memory_history(entries)
+    output = mock_console.export_text()
+    assert "PRIVATE LOCAL CONVERSATION MEMORY" in output
+    assert "Hello machine ghost" in output
+    assert "Greetings mortal" in output
+
+
+def test_render_persona_status(ui: GhostUI, mock_console: Console) -> None:
+    """Verify rendering of persona status panel."""
+    from ghostshell.persona import AVAILABLE_PERSONAS
+    current = AVAILABLE_PERSONAS["grim-debugger"]
+    ui.render_persona_status(current, AVAILABLE_PERSONAS)
+    output = mock_console.export_text()
+    assert "GHOST PERSONALITY MATRIX" in output
+    assert "Grim Debugger" in output
+    assert "ACTIVE" in output
+
+
+def test_render_non_local_warning(ui: GhostUI, mock_console: Console) -> None:
+    """Verify rendering of prominent non-local endpoint alert."""
+    ui.render_non_local_warning("https://api.openai.com/v1")
+    output = mock_console.export_text()
+    assert "NON-LOCAL MODEL ENDPOINT DETECTED" in output
+    assert "https://api.openai.com/v1" in output

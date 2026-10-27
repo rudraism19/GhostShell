@@ -14,6 +14,8 @@ from typing import Any, Final
 
 from ghostshell.client import GemmaClient, ModelServerError
 from ghostshell.config import DEFAULT_MODEL_ENDPOINT, DEFAULT_MODEL_NAME, DEFAULT_SYSTEM_PROMPT, GhostConfig
+from ghostshell.memory import GhostMemory
+from ghostshell.persona import PersonaEngine
 
 # Known shell command prefixes to detect for proactive security notifications
 COMMON_SHELL_COMMANDS: Final[frozenset[str]] = frozenset(
@@ -150,7 +152,7 @@ class PlaceholderEngine(BaseEngine):
 
 
 class GemmaEngine(BaseEngine):
-    """Phase 2 local Gemma response engine.
+    """Local Gemma response engine with personality and memory awareness.
 
     Connects to an on-device llama.cpp server hosting Gemma 3 1B Instruct GGUF.
     Enforces local-only inference and handles offline server states gracefully.
@@ -160,12 +162,16 @@ class GemmaEngine(BaseEngine):
         self,
         client: GemmaClient | None = None,
         config: GhostConfig | None = None,
+        persona_engine: PersonaEngine | None = None,
+        memory: GhostMemory | None = None,
     ) -> None:
         """Initialize the Gemma engine.
 
         Args:
             client: Configured GemmaClient instance.
             config: GhostConfig instance.
+            persona_engine: Optional PersonaEngine instance.
+            memory: Optional GhostMemory store.
         """
         self.config = config or GhostConfig()
         self.client = client or GemmaClient(
@@ -173,6 +179,8 @@ class GemmaEngine(BaseEngine):
             model_name=self.config.model_name,
             timeout=self.config.model_timeout,
         )
+        self.persona_engine = persona_engine
+        self.memory = memory
         self.system_prompt = self.config.model_system_prompt or DEFAULT_SYSTEM_PROMPT
 
     def process(self, prompt: str) -> GhostResponse:
@@ -195,10 +203,21 @@ class GemmaEngine(BaseEngine):
         first_word = words[0].lower() if words else ""
         shell_alert = first_word in COMMON_SHELL_COMMANDS
 
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": cleaned_prompt},
+        # Build dynamic system prompt using active persona if configured
+        if self.persona_engine:
+            active_sys_prompt = self.persona_engine.build_system_prompt(self.system_prompt)
+        else:
+            active_sys_prompt = self.system_prompt
+
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": active_sys_prompt}
         ]
+
+        # Inject bounded prior turns from private local memory if active
+        if self.memory and self.memory.enabled:
+            messages.extend(self.memory.get_context_messages(max_pairs=3))
+
+        messages.append({"role": "user", "content": cleaned_prompt})
 
         try:
             comp = self.client.chat_completion(messages)
@@ -208,6 +227,14 @@ class GemmaEngine(BaseEngine):
                 content += (
                     f"\n\n[dim #FFB000]⚠ Security Notice: Input matched shell prefix '{first_word}'. "
                     f"Command execution is strictly disabled; suggestions are text-only.[/dim #FFB000]"
+                )
+
+            # Record turn in private memory if configured
+            if self.memory:
+                self.memory.record_turn(
+                    user_prompt=cleaned_prompt,
+                    assistant_response=content,
+                    metadata={"tokens": comp.total_tokens, "mode": "GEMMA_LOCAL"},
                 )
 
             return GhostResponse(
@@ -236,7 +263,7 @@ class GemmaEngine(BaseEngine):
                 f"[bold #00FF66]To awaken the Gemma 3 1B Ghost on Windows PowerShell:[/bold #00FF66]\n"
                 f"1. Download [bold #39FF14]gemma-3-1b-it-Q4_K_M.gguf[/] into a [bold]models/[/] folder.\n"
                 f"2. Launch llama.cpp server in a separate terminal:\n"
-                f"   [bold #00F0FF]llama-server.exe -m models/gemma-3-1b-it-Q4_K_M.gguf --port 8080 -c 2048[/]\n"
+                f"   [bold #00F0FF]llama-server.exe -m models/gemma-3-1b-it-Q4_K_M.gguf --port 9931 (or 8080) -c 2048[/]\n"
                 f"3. Return here and submit your question again.\n\n"
                 f"[dim]GhostShell remains fully usable. Type /help to see rites or /status to check conduit health.[/dim]"
             )
