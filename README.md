@@ -2,6 +2,8 @@
 
 > **A spooky, local-first AI developer assistant for the Hacktoberfest “Ghost in the Machine” open-source AI challenge.**
 
+![GhostShell Banner](assets/cover.png)
+
 ```text
         .-"-.     _____ _               _   ____  _          _ _ 
        /     \   / ____| |             | | / ___|| |        | | |
@@ -16,6 +18,13 @@
 GhostShell is a haunted terminal companion that observes your command history, Git activity, and coding mistakes, translating them into eerie, intelligent commentary from a fictional ghost dwelling inside your machine.
 
 Powered by **Google Gemma 3 1B Instruct** via local `llama.cpp`, GhostShell runs **100% on-device with zero cloud telemetry**, engineered specifically for 8 GB RAM Windows laptops without dedicated GPUs.
+
+---
+
+## 🎬 Terminal Live Demo
+
+![GhostShell Demo](assets/demo.gif)
+> *High-definition 720p video walkthrough available at [`assets/demo.mp4`](assets/demo.mp4)*
 
 ---
 
