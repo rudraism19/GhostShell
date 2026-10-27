@@ -15,6 +15,16 @@ from __future__ import annotations
 import argparse
 import sys
 
+# Ensure UTF-8 standard stream handling on Windows
+if sys.platform == "win32":
+    for stream_name in ("stdout", "stderr", "stdin"):
+        stream = getattr(sys, stream_name, None)
+        if stream and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
+
 from ghostshell import __version__
 from ghostshell.commands import CommandAction, CommandHandler
 from ghostshell.config import GhostConfig, get_default_config
