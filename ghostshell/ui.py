@@ -2,10 +2,12 @@
 
 Renders dark CRT phosphor aesthetics, ghost-themed panels, startup animations,
 status diagnostics, and responsive layouts using the Rich library.
+Engineered to be completely stable and resilient when moving or resizing the terminal window.
 """
 
 from __future__ import annotations
 
+import shutil
 import sys
 import time
 from contextlib import contextmanager
@@ -72,11 +74,18 @@ class GhostUI:
         )
 
     def get_terminal_width(self) -> int:
-        """Safely retrieve current terminal width, falling back to 80."""
-        try:
-            return max(40, self.console.width)
-        except Exception:
-            return 80
+        """Safely retrieve current terminal width, resilient to window movement/resizing."""
+        for getter in (
+            lambda: shutil.get_terminal_size((80, 25)).columns,
+            lambda: self.console.size.width,
+        ):
+            try:
+                w = getter()
+                if w and w >= 20:
+                    return w
+            except Exception:
+                continue
+        return 80
 
     def clear_screen(self) -> None:
         """Clear the console screen cleanly across all operating systems."""
@@ -89,17 +98,31 @@ class GhostUI:
     ) -> Iterator[None]:
         """Display a ghostly phosphor spinner while waiting for model inference.
 
+        Resilient to terminal resizing and window dragging on Windows.
+
         Args:
             message: Spooky status message to display.
         """
         if sys.stdout.isatty():
-            with self.console.status(f"[bold {PHOSPHOR_BRIGHT}]{message}[/]", spinner="dots", spinner_style=SPECTRAL_CYAN):
+            try:
+                with self.console.status(
+                    f"[bold {PHOSPHOR_BRIGHT}]{message}[/]",
+                    spinner="dots",
+                    spinner_style=SPECTRAL_CYAN,
+                    refresh_per_second=6.0,
+                ):
+                    yield
+            except Exception:
+                # Absorb any transient interruption during window moving
                 yield
         else:
             yield
 
     def render_startup_banner(self, animated: bool | None = None) -> None:
-        """Display the haunted CRT boot sequence and ASCII banner.
+        """Display the haunted CRT boot sequence and adaptive ASCII banner.
+
+        Dynamically checks terminal width so window dragging or resizing
+        never breaks or mangles the ASCII art.
 
         Args:
             animated: Whether to run the boot sequence animation.
@@ -120,31 +143,58 @@ class GhostUI:
                 self.console.print(msg)
                 time.sleep(delay)
 
-        # Build compound ASCII banner
-        banner_table = Table.grid(padding=1)
-        banner_table.add_column(justify="center", vertical="middle")
-        banner_table.add_column(justify="left", vertical="middle")
+        width = self.get_terminal_width()
 
-        ghost_text = Text(GHOST_ART.strip("\n"), style=f"bold {PHOSPHOR_BRIGHT}")
-        logo_text = Text(BANNER_TEXT.strip("\n"), style=f"bold {PHOSPHOR_GREEN}")
+        if width >= 82:
+            # Wide layout: Ghost art beside full ASCII banner with no_wrap protection
+            banner_table = Table.grid(padding=1)
+            banner_table.add_column(justify="center", vertical="middle", no_wrap=True)
+            banner_table.add_column(justify="left", vertical="middle", no_wrap=True)
 
-        banner_table.add_row(ghost_text, logo_text)
+            ghost_text = Text(GHOST_ART.strip("\n"), style=f"bold {PHOSPHOR_BRIGHT}")
+            logo_text = Text(BANNER_TEXT.strip("\n"), style=f"bold {PHOSPHOR_GREEN}")
+            banner_table.add_row(ghost_text, logo_text)
+            banner_element = banner_table
 
-        tagline = Text.assemble(
-            ("⚡ ", f"bold {ECTO_AMBER}"),
-            ("GHOST IN THE MACHINE ", f"bold {PHOSPHOR_BRIGHT}"),
-            ("• ", f"{PHANTOM_DIM}"),
-            ("LOCAL-FIRST AI COMPANION ", f"{SPECTRAL_CYAN}"),
-            ("• ", f"{PHANTOM_DIM}"),
-            (f"v{self.config.version} ", f"italic {PHANTOM_DIM}"),
-            ("⚡", f"bold {ECTO_AMBER}"),
+            tagline = Text.assemble(
+                ("⚡ ", f"bold {ECTO_AMBER}"),
+                ("GHOST IN THE MACHINE ", f"bold {PHOSPHOR_BRIGHT}"),
+                ("• ", f"{PHANTOM_DIM}"),
+                ("LOCAL-FIRST AI COMPANION ", f"{SPECTRAL_CYAN}"),
+                ("• ", f"{PHANTOM_DIM}"),
+                (f"v{self.config.version} ", f"italic {PHANTOM_DIM}"),
+                ("⚡", f"bold {ECTO_AMBER}"),
+            )
+        else:
+            # Narrow / snapped window layout: Centered ghost and compact title
+            ghost_text = Text(GHOST_ART.strip("\n"), style=f"bold {PHOSPHOR_BRIGHT}", justify="center")
+            title_text = Text.assemble(
+                ("👻 ", f"bold {ECTO_AMBER}"),
+                ("G H O S T S H E L L", f"bold {PHOSPHOR_BRIGHT}"),
+                (" 👻", f"bold {ECTO_AMBER}"),
+                justify="center",
+            )
+            banner_element = Group(ghost_text, Text(""), title_text)
+
+            tagline = Text.assemble(
+                ("⚡ ", f"bold {ECTO_AMBER}"),
+                ("GHOST IN THE MACHINE • LOCAL-FIRST AI", f"bold {SPECTRAL_CYAN}"),
+                (" ⚡\n", f"bold {ECTO_AMBER}"),
+                (f"v{self.config.version} • Phase 2: Local Gemma 3 1B", f"italic {PHANTOM_DIM}"),
+                justify="center",
+            )
+
+        instructions = Text(
+            "Type /help for grimoire rites or /exit to sever connection.",
+            style=f"{GHOST_MIST}",
+            justify="center" if width < 82 else "left",
         )
 
         header_group = Group(
-            banner_table,
+            banner_element,
             Text(""),
             tagline,
-            Text("Type /help for grimoire rites or /exit to sever connection.", style=f"{GHOST_MIST}"),
+            instructions,
         )
 
         panel = Panel(
@@ -154,6 +204,8 @@ class GhostUI:
             title=f"[bold {SPECTRAL_CYAN}]👻 CONDUIT ONLINE 👻[/]",
             subtitle=f"[{PHANTOM_DIM}]Phase 2: Local Gemma 3 1B Integration[/]",
             padding=(1, 2),
+            expand=True,
+            safe_box=True,
         )
 
         self.console.print(panel)
@@ -173,36 +225,27 @@ class GhostUI:
     def render_gemma_response(self, response: GhostResponse) -> None:
         """Render a genuine response from the local Gemma model.
 
-        Displays the AI text/markdown, tokens consumed, latency, and
-        confirms that command execution is strictly sandboxed.
+        Displays the AI text/markdown and a responsive 2-column telemetry table
+        that adapts smoothly to window movements and resizing.
 
         Args:
             response: GhostResponse containing Gemma's generated content.
         """
-        # Diagnostic Telemetry Table
+        # Responsive 2-column Telemetry Table (no cramped 4-column overflow)
         diag_table = Table(
-            box=box.MINIMAL,
+            box=box.SIMPLE_HEAVY,
             show_header=False,
-            padding=(0, 1),
+            padding=(0, 2),
             border_style=PHANTOM_DIM,
+            expand=True,
         )
-        diag_table.add_column("Key1", style=f"bold {SPECTRAL_CYAN}")
-        diag_table.add_column("Val1", style=f"{GHOST_MIST}")
-        diag_table.add_column("Key2", style=f"bold {SPECTRAL_CYAN}")
-        diag_table.add_column("Val2", style=f"{GHOST_MIST}")
+        diag_table.add_column("Telemetry", style=f"bold {SPECTRAL_CYAN}", ratio=1, no_wrap=True)
+        diag_table.add_column("Status", style=f"{GHOST_MIST}", ratio=2)
 
-        diag_table.add_row(
-            "Spectral Model:",
-            f"[{PHOSPHOR_BRIGHT}]{response.model_name}[/]",
-            "Total Tokens:",
-            f"[{PHOSPHOR_GREEN}]{response.estimated_tokens}[/]",
-        )
-        diag_table.add_row(
-            "Latency:",
-            f"{response.latency_ms:.1f} ms",
-            "Security Lock:",
-            f"[{PHOSPHOR_GREEN}]SECURE (EXECUTION FORBIDDEN)[/]",
-        )
+        diag_table.add_row("Spectral Model:", f"[{PHOSPHOR_BRIGHT}]{response.model_name}[/]")
+        diag_table.add_row("Total Tokens:", f"[{PHOSPHOR_GREEN}]{response.estimated_tokens}[/]")
+        diag_table.add_row("Conduit Latency:", f"{response.latency_ms:.1f} ms")
+        diag_table.add_row("Security Lock:", f"[{PHOSPHOR_GREEN}]SECURE (EXECUTION FORBIDDEN)[/]")
 
         # Transmission Echo Panel
         echo_text = Text(f'"{response.prompt}"', style=f"italic {GHOST_MIST}")
@@ -212,6 +255,8 @@ class GhostUI:
             border_style=PHANTOM_DIM,
             title=f"[{PHOSPHOR_GREEN}]Transmission Query[/]",
             padding=(0, 1),
+            expand=True,
+            safe_box=True,
         )
 
         # Render Markdown body from Gemma
@@ -227,6 +272,8 @@ class GhostUI:
                 title=f"[{SPECTRAL_CYAN}]Local Inference Telemetry[/]",
                 box=box.HORIZONTALS,
                 border_style=PHANTOM_DEEP,
+                expand=True,
+                safe_box=True,
             ),
         )
 
@@ -237,6 +284,8 @@ class GhostUI:
             title=f"[bold {PHOSPHOR_BRIGHT}]👻 THE GHOST SPEAKS [GEMMA 3 1B INSTRUCT][/]",
             subtitle=f"[{PHANTOM_DIM}]Local llama.cpp Engine • 100% Private[/]",
             padding=(1, 2),
+            expand=True,
+            safe_box=True,
         )
 
         self.console.print(panel)
@@ -255,45 +304,37 @@ class GhostUI:
             title=f"[bold {CRIMSON_GLITCH}]⚠️  SPECTRAL CONDUIT OFFLINE[/]",
             subtitle=f"[{ECTO_AMBER}]llama.cpp Server Not Running on Port 8080[/]",
             padding=(1, 2),
+            expand=True,
+            safe_box=True,
         )
         self.console.print(panel)
         self.console.print()
 
     def render_placeholder_response(self, response: GhostResponse) -> None:
-        """Render a spectral reflection panel for Phase 1 UI mode.
+        """Render a spectral reflection panel for standalone mode.
 
         Args:
             response: GhostResponse containing echo data and diagnostics.
         """
         diag_table = Table(
-            box=box.MINIMAL,
+            box=box.SIMPLE_HEAVY,
             show_header=False,
-            padding=(0, 1),
+            padding=(0, 2),
             border_style=PHANTOM_DIM,
+            expand=True,
         )
-        diag_table.add_column("Key", style=f"bold {SPECTRAL_CYAN}")
-        diag_table.add_column("Value", style=f"{GHOST_MIST}")
-        diag_table.add_column("Key2", style=f"bold {SPECTRAL_CYAN}")
-        diag_table.add_column("Value2", style=f"{GHOST_MIST}")
+        diag_table.add_column("Telemetry", style=f"bold {SPECTRAL_CYAN}", ratio=1, no_wrap=True)
+        diag_table.add_column("Status", style=f"{GHOST_MIST}", ratio=2)
 
-        diag_table.add_row(
-            "Spectral State:",
-            f"[{PHOSPHOR_GREEN}]{response.status}[/]",
-            "Est. Tokens:",
-            f"[{PHOSPHOR_BRIGHT}]{response.estimated_tokens}[/]",
-        )
+        diag_table.add_row("Spectral State:", f"[{PHOSPHOR_GREEN}]{response.status}[/]")
+        diag_table.add_row("Estimated Tokens:", f"[{PHOSPHOR_BRIGHT}]{response.estimated_tokens}[/]")
         diag_table.add_row(
             "Transmission Len:",
             f"{response.char_count} chars ({response.word_count} words)",
-            "Conduit Latency:",
-            f"{response.latency_ms:.2f} ms",
         )
-        diag_table.add_row(
-            "Active Engine:",
-            f"[{ECTO_AMBER}]{response.model_name}[/]",
-            "Execution Lock:",
-            f"[{PHOSPHOR_GREEN}]LOCKED (ALLOW_EXECUTION=False)[/]",
-        )
+        diag_table.add_row("Conduit Latency:", f"{response.latency_ms:.2f} ms")
+        diag_table.add_row("Active Engine:", f"[{ECTO_AMBER}]{response.model_name}[/]")
+        diag_table.add_row("Execution Lock:", f"[{PHOSPHOR_GREEN}]LOCKED (ALLOW_EXECUTION=False)[/]")
 
         echo_text = Text(f'"{response.prompt}"', style=f"italic {GHOST_MIST}")
         echo_panel = Panel(
@@ -302,6 +343,8 @@ class GhostUI:
             border_style=PHANTOM_DIM,
             title=f"[{PHOSPHOR_GREEN}]Echoed Transmission[/]",
             padding=(0, 1),
+            expand=True,
+            safe_box=True,
         )
 
         body_text = Text.from_markup(response.content)
@@ -316,6 +359,8 @@ class GhostUI:
                 title=f"[{SPECTRAL_CYAN}]Conduit Diagnostics[/]",
                 box=box.HORIZONTALS,
                 border_style=PHANTOM_DEEP,
+                expand=True,
+                safe_box=True,
             ),
         )
 
@@ -326,6 +371,8 @@ class GhostUI:
             title=f"[bold {PHOSPHOR_BRIGHT}]👻 SPECTRAL REFLECTION [UI DEV MODE][/]",
             subtitle=f"[{PHANTOM_DIM}]Local Gemma LLM Integration Available[/]",
             padding=(1, 2),
+            expand=True,
+            safe_box=True,
         )
 
         self.console.print(panel)
@@ -343,11 +390,12 @@ class GhostUI:
             header_style=f"bold {PHOSPHOR_BRIGHT}",
             show_lines=True,
             padding=(0, 1),
+            expand=True,
         )
-        table.add_column("Command", style=f"bold {SPECTRAL_CYAN}", min_width=12)
-        table.add_column("Usage", style=f"bold {PHOSPHOR_GREEN}", min_width=16)
+        table.add_column("Command", style=f"bold {SPECTRAL_CYAN}", no_wrap=True)
+        table.add_column("Usage", style=f"bold {PHOSPHOR_GREEN}", no_wrap=True)
         table.add_column("Description", style=f"{GHOST_MIST}")
-        table.add_column("Aliases", style=f"italic {PHANTOM_DIM}", min_width=8)
+        table.add_column("Aliases", style=f"italic {PHANTOM_DIM}", no_wrap=True)
 
         for doc in docs:
             alias_str = ", ".join(doc.aliases) if doc.aliases else "—"
@@ -360,6 +408,8 @@ class GhostUI:
             title=f"[bold {PHOSPHOR_BRIGHT}]📜 SPECTRAL GRIMOIRE — COMMAND DIRECTORY[/]",
             subtitle=f"[{SPECTRAL_CYAN}]All commands run internally; no shell calls are made[/]",
             padding=(1, 1),
+            expand=True,
+            safe_box=True,
         )
         self.console.print(panel)
         self.console.print()
@@ -383,6 +433,8 @@ class GhostUI:
             border_style=PHOSPHOR_GREEN,
             title=f"[bold {PHOSPHOR_BRIGHT}]Grimoire: {doc.name}[/]",
             padding=(1, 2),
+            expand=True,
+            safe_box=True,
         )
         self.console.print(panel)
         self.console.print()
@@ -398,9 +450,10 @@ class GhostUI:
             border_style=PHOSPHOR_GREEN,
             header_style=f"bold {SPECTRAL_CYAN}",
             padding=(0, 2),
+            expand=True,
         )
-        table.add_column("Subsystem", style=f"bold {SPECTRAL_CYAN}", min_width=20)
-        table.add_column("Telemetry Status", style=f"{GHOST_MIST}")
+        table.add_column("Subsystem", style=f"bold {SPECTRAL_CYAN}", ratio=1, no_wrap=True)
+        table.add_column("Telemetry Status", style=f"{GHOST_MIST}", ratio=2)
 
         for key, val in info.items():
             label = key.replace("_", " ").title()
@@ -420,6 +473,8 @@ class GhostUI:
             title=f"[bold {PHOSPHOR_BRIGHT}]🔮 SPECTRAL CONDUIT DIAGNOSTICS[/]",
             subtitle=f"[{PHANTOM_DIM}]GhostShell Status Check[/]",
             padding=(1, 1),
+            expand=True,
+            safe_box=True,
         )
         self.console.print(panel)
         self.console.print()
@@ -435,9 +490,10 @@ class GhostUI:
             border_style=SPECTRAL_CYAN,
             header_style=f"bold {PHOSPHOR_BRIGHT}",
             padding=(0, 2),
+            expand=True,
         )
-        table.add_column("Property", style=f"bold {SPECTRAL_CYAN}", min_width=18)
-        table.add_column("Configuration", style=f"{GHOST_MIST}")
+        table.add_column("Property", style=f"bold {SPECTRAL_CYAN}", ratio=1, no_wrap=True)
+        table.add_column("Configuration", style=f"{GHOST_MIST}", ratio=2)
 
         for key, val in info.items():
             table.add_row(key, str(val))
@@ -449,6 +505,8 @@ class GhostUI:
             title=f"[bold {PHOSPHOR_BRIGHT}]🧠 LOCAL GEMMA MODEL STATUS[/]",
             subtitle=f"[{PHANTOM_DIM}]OpenAI-Compatible Local Endpoint[/]",
             padding=(1, 1),
+            expand=True,
+            safe_box=True,
         )
         self.console.print(panel)
         self.console.print()
@@ -466,6 +524,8 @@ class GhostUI:
             title=f"[bold {PHOSPHOR_BRIGHT}]👻 THE GHOST IN THE MACHINE[/]",
             subtitle=f"[{PHANTOM_DIM}]Open-Source AI Challenge Lore[/]",
             padding=(1, 2),
+            expand=True,
+            safe_box=True,
         )
         self.console.print(panel)
         self.console.print()
@@ -483,6 +543,8 @@ class GhostUI:
             title=f"[bold {CRIMSON_GLITCH}]⚠️  SPECTRAL ANOMALY DETECTED[/]",
             subtitle=f"[{ECTO_AMBER}]Conduit Stable — Command Rejected[/]",
             padding=(1, 2),
+            expand=True,
+            safe_box=True,
         )
         self.console.print(panel)
         self.console.print()
@@ -499,6 +561,8 @@ class GhostUI:
             box=box.ROUNDED,
             border_style=PHANTOM_DIM,
             padding=(1, 2),
+            expand=True,
+            safe_box=True,
         )
         self.console.print(panel)
         self.console.print()

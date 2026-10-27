@@ -134,11 +134,30 @@ def get_default_config() -> GhostConfig:
     )
 
 
+def enable_windows_virtual_terminal() -> None:
+    """Enable VT100 / Virtual Terminal processing in Windows conhost."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            h_out = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+            if h_out and h_out != -1:
+                mode = ctypes.c_ulong()
+                if kernel32.GetConsoleMode(h_out, ctypes.byref(mode)):
+                    # 0x0004: ENABLE_VIRTUAL_TERMINAL_PROCESSING
+                    # 0x0001: ENABLE_PROCESSED_OUTPUT
+                    # 0x0002: ENABLE_WRAP_AT_EOL_OUTPUT
+                    kernel32.SetConsoleMode(h_out, mode.value | 0x0004 | 0x0001 | 0x0002)
+        except Exception:
+            pass
+
+
 def create_console(config: GhostConfig | None = None) -> Console:
     """Instantiate and configure a Rich Console tailored for GhostShell.
 
-    Ensures UTF-8 encoding support on Windows terminals and binds the spectral
-    phosphor theme.
+    Ensures UTF-8 encoding support on Windows terminals, enables virtual terminal
+    processing to prevent cursor drift and line wrap glitches on window moving/resizing,
+    and binds the spectral phosphor theme.
 
     Args:
         config: Optional GhostConfig instance.
@@ -146,17 +165,20 @@ def create_console(config: GhostConfig | None = None) -> Console:
     Returns:
         A pre-configured Console object.
     """
+    enable_windows_virtual_terminal()
+
     if sys.platform == "win32":
-        try:
-            if hasattr(sys.stdout, "reconfigure"):
-                sys.stdout.reconfigure(encoding="utf-8")
-            if hasattr(sys.stderr, "reconfigure"):
-                sys.stderr.reconfigure(encoding="utf-8")
-        except Exception:
-            pass
+        for stream_name in ("stdout", "stderr"):
+            stream = getattr(sys, stream_name, None)
+            if stream and hasattr(stream, "reconfigure"):
+                try:
+                    stream.reconfigure(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
 
     return Console(
         theme=GHOST_THEME,
         color_system="auto",
         highlight=False,
+        safe_box=True,
     )

@@ -25,7 +25,7 @@ if sys.platform == "win32":
 from ghostshell import __version__
 from ghostshell.client import GemmaClient
 from ghostshell.commands import CommandAction, CommandHandler
-from ghostshell.config import GhostConfig, get_default_config
+from ghostshell.config import GhostConfig, enable_windows_virtual_terminal, get_default_config
 from ghostshell.engine import BaseEngine, GemmaEngine, PlaceholderEngine
 from ghostshell.ui import GhostUI
 
@@ -111,6 +111,9 @@ def run_repl(ui: GhostUI, handler: CommandHandler, engine: BaseEngine) -> int:
             ui.console.print("\n[dim #2D7D46]Conduit closed via EOF signal.[/]")
             ui.render_goodbye()
             break
+        except (OSError, InterruptedError):
+            # Absorb any transient interrupt caused by moving or resizing the window
+            continue
 
         stripped_input = raw_input.strip()
 
@@ -181,6 +184,7 @@ def main() -> int:
     Returns:
         Exit code integer.
     """
+    enable_windows_virtual_terminal()
     args = parse_args()
 
     # Build configuration
