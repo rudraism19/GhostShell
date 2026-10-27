@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
 import pytest
 from rich.console import Console
 
@@ -25,12 +26,12 @@ def ui(mock_console: Console) -> GhostUI:
 
 
 def test_render_startup_banner(ui: GhostUI, mock_console: Console) -> None:
-    """Verify banner rendering contains GhostShell, tagline, and Phase 2."""
+    """Verify banner rendering contains GhostShell, tagline, and Phase 3."""
     ui.render_startup_banner(animated=False)
     output = mock_console.export_text()
     assert "GHOST IN THE MACHINE" in output
     assert "CONDUIT ONLINE" in output
-    assert "Phase 2" in output
+    assert "Phase 3" in output
 
 
 def test_render_gemma_response(ui: GhostUI, mock_console: Console) -> None:
@@ -61,15 +62,15 @@ def test_render_model_offline(ui: GhostUI, mock_console: Console) -> None:
     """Verify rendering of non-crashing offline guidance panel."""
     response = GhostResponse(
         prompt="Explain memory leak",
-        content="Spectral Conduit Severed: Start llama-server on port 8080.",
+        content="Spectral Conduit Severed: Start llama-server on port 9931.",
         mode="SERVER_OFFLINE",
         status="CONDUIT_SEVERED",
     )
     ui.render_model_offline(response)
     output = mock_console.export_text()
     assert "SPECTRAL CONDUIT OFFLINE" in output
-    assert "llama.cpp Server Not Running on Port 8080" in output
-    assert "Start llama-server on port 8080" in output
+    assert "llama.cpp Server Not Running on Port 9931" in output
+    assert "Start llama-server on port 9931" in output
 
 
 def test_render_model_info(ui: GhostUI, mock_console: Console) -> None:
@@ -118,3 +119,41 @@ def test_status_spinner_context_manager(ui: GhostUI) -> None:
     """Ensure status_spinner runs without error."""
     with ui.status_spinner("Testing spinner"):
         pass
+
+
+def test_render_java_debug_result(ui: GhostUI, mock_console: Console) -> None:
+    """Verify rendering of 5 sections in Java exorcism report."""
+    from ghostshell.debugger import JavaDebugResult
+    res = JavaDebugResult(
+        whisper="A silent specter in the bytecode.",
+        root_cause="Null pointer dereference on line 5.",
+        corrected_code="String s = \"ghost\";\nSystem.out.println(s.length());",
+        explanation="Initialize string prior to method call.",
+        verification="Compile and run in terminal.",
+        latency_ms=75.0,
+        tokens=88,
+    )
+    ui.render_java_debug_result(res)
+    output = mock_console.export_text()
+    assert "THE GHOST'S WHISPER" in output
+    assert "A silent specter" in output
+    assert "ROOT CAUSE" in output
+    assert "CORRECTED JAVA CODE" in output
+    assert "EXPLANATION OF THE FIX" in output
+    assert "VERIFICATION" in output
+    assert "75.0 ms" in output
+
+
+def test_prompt_multiline_input_done(ui: GhostUI) -> None:
+    """Verify multiline input stops on :done."""
+    with patch.object(ui.console, "input", side_effect=["for (int i = 0; i < 5; i++) {", "    System.out.println(i);", "}", ":done"]):
+        text = ui.prompt_multiline_input("Code", "Type :done")
+    assert text is not None
+    assert "System.out.println(i);" in text
+
+
+def test_prompt_multiline_input_cancel(ui: GhostUI) -> None:
+    """Verify multiline input aborts on :cancel."""
+    with patch.object(ui.console, "input", side_effect=["class Broken {", ":cancel"]):
+        text = ui.prompt_multiline_input("Code", "Type :done")
+    assert text is None

@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""GhostShell - Phase 2 Entry Point.
+"""GhostShell - Phase 3 Entry Point.
 
-A spooky, local-first AI developer assistant for the
-"Ghost in the Machine" open-source AI challenge.
-
-Powered by a local Gemma 3 1B Instruct GGUF model via llama.cpp server.
+A spooky, local-first AI developer assistant powered by local Gemma 3 1B
+featuring the Possessed Java Debugger for the "Ghost in the Machine" open-source AI challenge.
 """
 
 from __future__ import annotations
@@ -26,6 +24,7 @@ from ghostshell import __version__
 from ghostshell.client import GemmaClient
 from ghostshell.commands import CommandAction, CommandHandler
 from ghostshell.config import GhostConfig, enable_windows_virtual_terminal, get_default_config
+from ghostshell.debugger import JavaDebugger, JavaDebugRequest
 from ghostshell.engine import BaseEngine, GemmaEngine, PlaceholderEngine
 from ghostshell.ui import GhostUI
 
@@ -38,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(
         prog="GhostShell",
-        description="A spooky, local-first AI developer assistant powered by local Gemma 3 1B.",
+        description="A spooky, local-first AI developer assistant & Possessed Java Debugger powered by local Gemma 3 1B.",
     )
     parser.add_argument(
         "--no-animation",
@@ -48,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-v", "--version",
         action="version",
-        version=f"GhostShell v{__version__} (Phase 2 - Local Gemma)",
+        version=f"GhostShell v{__version__} (Phase 3 - Possessed Java Debugger)",
     )
     parser.add_argument(
         "--diagnostics",
@@ -59,7 +58,7 @@ def parse_args() -> argparse.Namespace:
         "--endpoint",
         type=str,
         default=None,
-        help="Custom URL for local OpenAI-compatible endpoint (default: http://127.0.0.1:8080/v1/chat/completions).",
+        help="Custom URL for local OpenAI-compatible endpoint (default: http://127.0.0.1:9931/v1/chat/completions).",
     )
     parser.add_argument(
         "--model",
@@ -75,17 +74,23 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def run_repl(ui: GhostUI, handler: CommandHandler, engine: BaseEngine) -> int:
+def run_repl(
+    ui: GhostUI,
+    handler: CommandHandler,
+    engine: BaseEngine,
+    debugger: JavaDebugger | None = None,
+) -> int:
     """Run the interactive GhostShell Read-Eval-Print Loop.
 
-    Handles user inputs, slash commands, local Gemma responses, Ctrl+C signals,
-    and terminal edge cases with spooky flair. Guarantees that neither user
-    input nor generated responses are ever executed as shell commands.
+    Handles user inputs, slash commands, local Gemma responses, Java code
+    debugging, Ctrl+C signals, and terminal edge cases with spooky flair.
+    Guarantees that neither user input nor generated code is ever executed as shell commands.
 
     Args:
         ui: Configured GhostUI renderer.
         handler: CommandHandler registry.
         engine: Response engine (GemmaEngine or PlaceholderEngine).
+        debugger: Optional JavaDebugger instance.
 
     Returns:
         Process exit code (0 for clean termination).
@@ -94,6 +99,9 @@ def run_repl(ui: GhostUI, handler: CommandHandler, engine: BaseEngine) -> int:
     if ui.config.allow_command_execution:
         ui.render_error("FATAL: Security containment breached. Command execution must remain False.")
         return 1
+
+    client_instance = getattr(engine, "client", None)
+    active_debugger = debugger or JavaDebugger(client=client_instance, config=ui.config)
 
     # Display initial startup sequence
     ui.render_startup_banner()
@@ -151,6 +159,33 @@ def run_repl(ui: GhostUI, handler: CommandHandler, engine: BaseEngine) -> int:
                     ui.render_model_info(result.data["info"])
                 elif payload_type == "about":
                     ui.render_about(result.data["content"])
+                elif payload_type == "debug_interactive":
+                    code = ui.prompt_multiline_input(
+                        title="👻 POSSESSED JAVA DEBUGGER — SOURCE CODE",
+                        instruction="Paste or type your Java code below.\nType ':done' on an empty line when finished, or ':cancel' to abort.",
+                    )
+                    if not code:
+                        continue
+
+                    err_msg = ui.prompt_multiline_input(
+                        title="👻 POSSESSED JAVA DEBUGGER — COMPILER ERROR / LOGS (OPTIONAL)",
+                        instruction="Paste compiler error, stack trace, or press ':done' if none. Type ':cancel' to skip.",
+                    )
+                    if err_msg is None:
+                        err_msg = ""
+
+                    req = JavaDebugRequest(code=code, error_message=err_msg)
+                    with ui.status_spinner("👻 The possessed debugger is examining your Java bytecode..."):
+                        debug_res = active_debugger.analyze(req)
+                    ui.render_java_debug_result(debug_res)
+
+                elif payload_type == "debug_inline":
+                    inline_code = result.data.get("code", "")
+                    req = JavaDebugRequest(code=inline_code)
+                    with ui.status_spinner("👻 The possessed debugger is examining your Java bytecode..."):
+                        debug_res = active_debugger.analyze(req)
+                    ui.render_java_debug_result(debug_res)
+
                 else:
                     if result.message:
                         ui.console.print(result.message)
@@ -210,6 +245,7 @@ def main() -> int:
     else:
         engine = GemmaEngine(client=client, config=config)
 
+    debugger = JavaDebugger(client=client, config=config)
     ui = GhostUI(config=config)
     handler = CommandHandler(config=config, client=client)
 
@@ -219,7 +255,7 @@ def main() -> int:
             ui.render_status(status_res.data["info"])
         return 0
 
-    return run_repl(ui=ui, handler=handler, engine=engine)
+    return run_repl(ui=ui, handler=handler, engine=engine, debugger=debugger)
 
 
 if __name__ == "__main__":

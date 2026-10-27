@@ -133,7 +133,7 @@ class GemmaClient:
             data=data_bytes,
             headers={
                 "Content-Type": "application/json",
-                "User-Agent": "GhostShell/0.2.0 (Local-First Assistant)",
+                "User-Agent": "GhostShell/0.3.0 (Local-First Assistant)",
             },
             method="POST",
         )

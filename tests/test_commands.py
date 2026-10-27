@@ -49,7 +49,25 @@ def test_command_help_all(handler: CommandHandler) -> None:
     assert "/exit" in cmd_names
     assert "/status" in cmd_names
     assert "/model" in cmd_names
+    assert "/debug" in cmd_names
     assert "/about" in cmd_names
+
+
+def test_command_debug(handler: CommandHandler) -> None:
+    """Verify /debug returns debug_interactive or debug_inline."""
+    res_interactive = handler.execute("/debug")
+    assert res_interactive.action == CommandAction.CONTINUE
+    assert res_interactive.data["type"] == "debug_interactive"
+
+    res_inline = handler.execute("/debug int x = 5;")
+    assert res_inline.action == CommandAction.CONTINUE
+    assert res_inline.data["type"] == "debug_inline"
+    assert res_inline.data["code"] == "int x = 5;"
+
+    # Test alias /javadebug
+    res_alias = handler.execute("/javadebug int y = 10;")
+    assert res_alias.action == CommandAction.CONTINUE
+    assert res_alias.data["type"] == "debug_inline"
 
 
 def test_command_help_single(handler: CommandHandler) -> None:

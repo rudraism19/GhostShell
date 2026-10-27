@@ -1,8 +1,7 @@
 """Terminal User Interface (TUI) for GhostShell.
 
 Renders dark CRT phosphor aesthetics, ghost-themed panels, startup animations,
-status diagnostics, and responsive layouts using the Rich library.
-Engineered to be completely stable and resilient when moving or resizing the terminal window.
+status diagnostics, possessed Java debugger reports, and responsive layouts using Rich.
 """
 
 from __future__ import annotations
@@ -17,6 +16,7 @@ from rich import box
 from rich.console import Console, Group
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
@@ -160,7 +160,7 @@ class GhostUI:
                 ("⚡ ", f"bold {ECTO_AMBER}"),
                 ("GHOST IN THE MACHINE ", f"bold {PHOSPHOR_BRIGHT}"),
                 ("• ", f"{PHANTOM_DIM}"),
-                ("LOCAL-FIRST AI COMPANION ", f"{SPECTRAL_CYAN}"),
+                ("POSSESSED JAVA ASSISTANT ", f"{SPECTRAL_CYAN}"),
                 ("• ", f"{PHANTOM_DIM}"),
                 (f"v{self.config.version} ", f"italic {PHANTOM_DIM}"),
                 ("⚡", f"bold {ECTO_AMBER}"),
@@ -180,12 +180,12 @@ class GhostUI:
                 ("⚡ ", f"bold {ECTO_AMBER}"),
                 ("GHOST IN THE MACHINE • LOCAL-FIRST AI", f"bold {SPECTRAL_CYAN}"),
                 (" ⚡\n", f"bold {ECTO_AMBER}"),
-                (f"v{self.config.version} • Phase 2: Local Gemma 3 1B", f"italic {PHANTOM_DIM}"),
+                (f"v{self.config.version} • Phase 3: Possessed Java Debugger", f"italic {PHANTOM_DIM}"),
                 justify="center",
             )
 
         instructions = Text(
-            "Type /help for grimoire rites or /exit to sever connection.",
+            "Type /debug to exorcise Java code, /help for rites, or /exit to sever connection.",
             style=f"{GHOST_MIST}",
             justify="center" if width < 82 else "left",
         )
@@ -202,7 +202,7 @@ class GhostUI:
             box=box.DOUBLE,
             border_style=PHOSPHOR_GREEN,
             title=f"[bold {SPECTRAL_CYAN}]👻 CONDUIT ONLINE 👻[/]",
-            subtitle=f"[{PHANTOM_DIM}]Phase 2: Local Gemma 3 1B Integration[/]",
+            subtitle=f"[{PHANTOM_DIM}]Phase 3: Possessed Java Debugger[/]",
             padding=(1, 2),
             expand=True,
             safe_box=True,
@@ -222,6 +222,197 @@ class GhostUI:
         except (KeyboardInterrupt, EOFError):
             raise
 
+    def prompt_multiline_input(
+        self,
+        title: str = "Java Source Code",
+        instruction: str = "Paste or type Java code. Type ':done' on an empty line when finished, or ':cancel' to abort.",
+    ) -> str | None:
+        """Prompt user for multiline text input in a clean, haunted terminal interface.
+
+        Args:
+            title: Title for the input section panel.
+            instruction: User guidelines on completing input.
+
+        Returns:
+            The collected multiline string, or None if cancelled.
+        """
+        info_panel = Panel(
+            Text.from_markup(f"[bold {PHOSPHOR_BRIGHT}]{title}[/]\n[{GHOST_MIST}]{instruction}[/]"),
+            box=box.ROUNDED,
+            border_style=PHOSPHOR_GREEN,
+            padding=(0, 2),
+            expand=True,
+            safe_box=True,
+        )
+        self.console.print(info_panel)
+
+        lines: list[str] = []
+        line_num = 1
+        while True:
+            try:
+                line_prompt = f"[{PHANTOM_DIM}]debug:{line_num:02d}[/] [bold {PHOSPHOR_GREEN}]›[/] "
+                line = self.console.input(line_prompt)
+            except KeyboardInterrupt:
+                self.console.print("\n[bold #FFB000]👻 Exorcism ritual cancelled by user (Ctrl+C).[/]")
+                return None
+            except EOFError:
+                break
+            except (OSError, InterruptedError):
+                continue
+
+            stripped = line.strip()
+            if stripped.lower() in (":done", ":end", "eof"):
+                break
+            if stripped.lower() in (":cancel", ":quit", ":exit"):
+                self.console.print("[dim #FFB000]Debugging ritual abandoned.[/]")
+                return None
+
+            lines.append(line)
+            line_num += 1
+
+        content = "\n".join(lines).strip()
+        return content
+
+    def render_java_debug_result(self, result: Any) -> None:
+        """Render structured Java exorcism report across 5 dedicated Rich panels.
+
+        Args:
+            result: JavaDebugResult containing whisper, root cause, fix,
+                    explanation, and verification steps.
+        """
+        # Section 1: 👻 Ghost's Whisper
+        whisper_text = Text.assemble(
+            ("👻 \"", f"bold {PHOSPHOR_BRIGHT}"),
+            (result.whisper, f"italic {PHOSPHOR_BRIGHT}"),
+            ("\"", f"bold {PHOSPHOR_BRIGHT}"),
+        )
+        whisper_panel = Panel(
+            whisper_text,
+            box=box.ROUNDED,
+            border_style=SPECTRAL_CYAN,
+            title=f"[bold {SPECTRAL_CYAN}]👻 THE GHOST'S WHISPER[/]",
+            padding=(0, 2),
+            expand=True,
+            safe_box=True,
+        )
+
+        # Section 2: Root Cause (Ambiguity alert if missing context)
+        if getattr(result, "is_ambiguous", False):
+            root_title = f"[bold {ECTO_AMBER}]⚠️ UNCERTAIN HAUNT — MISSING CONTEXT[/]"
+            root_border = ECTO_AMBER
+            cause_prefix = "[bold #FFB000]Incomplete Fragment / Ambiguity:[/bold #FFB000]\n"
+        else:
+            root_title = f"[bold {CRIMSON_GLITCH}]🔍 ROOT CAUSE[/]"
+            root_border = CRIMSON_GLITCH
+            cause_prefix = "[bold #FF3366]Defect Diagnosed:[/bold #FF3366]\n"
+
+        root_panel = Panel(
+            Text.from_markup(f"{cause_prefix}{result.root_cause}"),
+            box=box.ROUNDED,
+            border_style=root_border,
+            title=root_title,
+            padding=(0, 2),
+            expand=True,
+            safe_box=True,
+        )
+
+        # Section 3: Corrected Code (Java Syntax Highlighted)
+        syntax_block = Syntax(
+            result.corrected_code,
+            "java",
+            theme="monokai",
+            line_numbers=True,
+            word_wrap=True,
+        )
+        code_panel = Panel(
+            syntax_block,
+            box=box.ROUNDED,
+            border_style=PHOSPHOR_GREEN,
+            title=f"[bold {PHOSPHOR_BRIGHT}]✨ CORRECTED JAVA CODE[/]",
+            subtitle=f"[{PHANTOM_DIM}]Sandboxed Output • Code Not Automatically Executed[/]",
+            padding=(0, 1),
+            expand=True,
+            safe_box=True,
+        )
+
+        # Section 4: Explanation
+        explanation_renderable = Markdown(result.explanation)
+        explanation_panel = Panel(
+            explanation_renderable,
+            box=box.ROUNDED,
+            border_style=PHOSPHOR_GREEN,
+            title=f"[bold {PHOSPHOR_BRIGHT}]💡 EXPLANATION OF THE FIX[/]",
+            padding=(0, 2),
+            expand=True,
+            safe_box=True,
+        )
+
+        # Section 5: Verification
+        verification_renderable = Markdown(result.verification)
+        verification_panel = Panel(
+            verification_renderable,
+            box=box.ROUNDED,
+            border_style=SPECTRAL_CYAN,
+            title=f"[bold {SPECTRAL_CYAN}]🧪 VERIFICATION & TESTING STEPS[/]",
+            subtitle=f"[{PHANTOM_DIM}]Host execution locked — Recompile and verify in your IDE or Maven/Gradle[/]",
+            padding=(0, 2),
+            expand=True,
+            safe_box=True,
+        )
+
+        # Telemetry Footer Table
+        diag_table = Table(
+            box=box.SIMPLE_HEAVY,
+            show_header=False,
+            padding=(0, 2),
+            border_style=PHANTOM_DIM,
+            expand=True,
+        )
+        diag_table.add_column("Telemetry", style=f"bold {SPECTRAL_CYAN}", ratio=1, no_wrap=True)
+        diag_table.add_column("Status", style=f"{GHOST_MIST}", ratio=2)
+
+        diag_table.add_row("Spectral Model:", f"[{PHOSPHOR_BRIGHT}]{result.model_used}[/]")
+        diag_table.add_row("Tokens Consumed:", f"[{PHOSPHOR_GREEN}]{result.tokens}[/]")
+        diag_table.add_row("Inference Latency:", f"{result.latency_ms:.1f} ms")
+        diag_table.add_row("Execution Lock:", f"[{PHOSPHOR_GREEN}]SECURE (CODE EXECUTION STRICTLY DISABLED)[/]")
+
+        telemetry_panel = Panel(
+            diag_table,
+            title=f"[{SPECTRAL_CYAN}]Possessed Debugger Diagnostics[/]",
+            box=box.HORIZONTALS,
+            border_style=PHANTOM_DEEP,
+            expand=True,
+            safe_box=True,
+        )
+
+        report_group = Group(
+            whisper_panel,
+            Text(""),
+            root_panel,
+            Text(""),
+            code_panel,
+            Text(""),
+            explanation_panel,
+            Text(""),
+            verification_panel,
+            Text(""),
+            telemetry_panel,
+        )
+
+        master_panel = Panel(
+            report_group,
+            box=box.DOUBLE,
+            border_style=PHOSPHOR_GREEN,
+            title=f"[bold {PHOSPHOR_BRIGHT}]👻 POSSESSED JAVA DEBUGGER — EXORCISM REPORT[/]",
+            subtitle=f"[{PHANTOM_DIM}]Gemma 3 1B Local Inference • 100% Private[/]",
+            padding=(1, 2),
+            expand=True,
+            safe_box=True,
+        )
+
+        self.console.print(master_panel)
+        self.console.print()
+
     def render_gemma_response(self, response: GhostResponse) -> None:
         """Render a genuine response from the local Gemma model.
 
@@ -231,7 +422,6 @@ class GhostUI:
         Args:
             response: GhostResponse containing Gemma's generated content.
         """
-        # Responsive 2-column Telemetry Table (no cramped 4-column overflow)
         diag_table = Table(
             box=box.SIMPLE_HEAVY,
             show_header=False,
@@ -247,7 +437,6 @@ class GhostUI:
         diag_table.add_row("Conduit Latency:", f"{response.latency_ms:.1f} ms")
         diag_table.add_row("Security Lock:", f"[{PHOSPHOR_GREEN}]SECURE (EXECUTION FORBIDDEN)[/]")
 
-        # Transmission Echo Panel
         echo_text = Text(f'"{response.prompt}"', style=f"italic {GHOST_MIST}")
         echo_panel = Panel(
             echo_text,
@@ -259,7 +448,6 @@ class GhostUI:
             safe_box=True,
         )
 
-        # Render Markdown body from Gemma
         body_renderable = Markdown(response.content)
 
         content_group = Group(
@@ -302,7 +490,7 @@ class GhostUI:
             box=box.HEAVY,
             border_style=ECTO_AMBER,
             title=f"[bold {CRIMSON_GLITCH}]⚠️  SPECTRAL CONDUIT OFFLINE[/]",
-            subtitle=f"[{ECTO_AMBER}]llama.cpp Server Not Running on Port 8080[/]",
+            subtitle=f"[{ECTO_AMBER}]llama.cpp Server Not Running on Port 9931[/]",
             padding=(1, 2),
             expand=True,
             safe_box=True,

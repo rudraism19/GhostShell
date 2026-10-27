@@ -121,3 +121,53 @@ def test_repl_eof_error(
     output = console.export_text()
     assert "Conduit closed via EOF signal" in output
     assert "Farewell, mortal." in output
+
+
+def test_repl_debug_command_interactive(
+    repl_env: tuple[GhostUI, CommandHandler, GemmaEngine, Console, MagicMock]
+) -> None:
+    """Test /debug interactive multiline entry in REPL."""
+    ui, handler, engine, console, mock_client = repl_env
+
+    mock_client.chat_completion.return_value = CompletionResponse(
+        content="### 👻 Ghost's Whisper\nBug gone.\n### Root Cause\nTypo\n### Corrected Code\n```java\nint x=1;\n```\n### Explanation\nFixed\n### Verification\nRun it",
+        model="gemma-3-1b-it",
+        prompt_tokens=10,
+        completion_tokens=20,
+        total_tokens=30,
+        latency_ms=50.0,
+    )
+
+    with patch.object(ui, "get_input", side_effect=["/debug", "/exit"]):
+        with patch.object(ui, "prompt_multiline_input", side_effect=["int x = 0;", "error log"]):
+            exit_code = run_repl(ui, handler, engine)
+
+    assert exit_code == 0
+    output = console.export_text()
+    assert "POSSESSED JAVA DEBUGGER" in output
+    assert "CORRECTED JAVA CODE" in output
+
+
+def test_repl_debug_command_inline(
+    repl_env: tuple[GhostUI, CommandHandler, GemmaEngine, Console, MagicMock]
+) -> None:
+    """Test /debug with inline code in REPL."""
+    ui, handler, engine, console, mock_client = repl_env
+
+    mock_client.chat_completion.return_value = CompletionResponse(
+        content="### 👻 Ghost's Whisper\nWhisper.\n### Root Cause\nCause\n### Corrected Code\n```java\nint y=2;\n```\n### Explanation\nWhy\n### Verification\nTest",
+        model="gemma-3-1b-it",
+        prompt_tokens=10,
+        completion_tokens=20,
+        total_tokens=30,
+        latency_ms=40.0,
+    )
+
+    with patch.object(ui, "get_input", side_effect=["/debug for (int col = 1; col <= row; row++) {}", "/exit"]):
+        exit_code = run_repl(ui, handler, engine)
+
+    assert exit_code == 0
+    output = console.export_text()
+    assert "POSSESSED JAVA DEBUGGER" in output
+    assert "CORRECTED JAVA CODE" in output
+    assert "Farewell, mortal." in output
