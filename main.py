@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-"""GhostShell - Phase 1 Entry Point.
+"""GhostShell - Phase 2 Entry Point.
 
 A spooky, local-first AI developer assistant for the
 "Ghost in the Machine" open-source AI challenge.
 
-Usage:
-    python main.py
-    python main.py --no-animation
-    python main.py --version
+Powered by a local Gemma 3 1B Instruct GGUF model via llama.cpp server.
 """
 
 from __future__ import annotations
@@ -26,9 +23,10 @@ if sys.platform == "win32":
                 pass
 
 from ghostshell import __version__
+from ghostshell.client import GemmaClient
 from ghostshell.commands import CommandAction, CommandHandler
 from ghostshell.config import GhostConfig, get_default_config
-from ghostshell.engine import PlaceholderEngine
+from ghostshell.engine import BaseEngine, GemmaEngine, PlaceholderEngine
 from ghostshell.ui import GhostUI
 
 
@@ -40,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(
         prog="GhostShell",
-        description="A spooky, local-first AI developer assistant for the 'Ghost in the Machine' challenge.",
+        description="A spooky, local-first AI developer assistant powered by local Gemma 3 1B.",
     )
     parser.add_argument(
         "--no-animation",
@@ -50,27 +48,44 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-v", "--version",
         action="version",
-        version=f"GhostShell v{__version__} (Phase 1)",
+        version=f"GhostShell v{__version__} (Phase 2 - Local Gemma)",
     )
     parser.add_argument(
         "--diagnostics",
         action="store_true",
         help="Print startup status diagnostics and exit.",
     )
+    parser.add_argument(
+        "--endpoint",
+        type=str,
+        default=None,
+        help="Custom URL for local OpenAI-compatible endpoint (default: http://127.0.0.1:8080/v1/chat/completions).",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Model name expected by local llama.cpp server (default: gemma-3-1b-it).",
+    )
+    parser.add_argument(
+        "--placeholder",
+        action="store_true",
+        help="Force Phase 1 standalone UI development placeholder mode.",
+    )
     return parser.parse_args()
 
 
-def run_repl(ui: GhostUI, handler: CommandHandler, engine: PlaceholderEngine) -> int:
+def run_repl(ui: GhostUI, handler: CommandHandler, engine: BaseEngine) -> int:
     """Run the interactive GhostShell Read-Eval-Print Loop.
 
-    Handles user inputs, slash commands, placeholder responses, Ctrl+C signals,
+    Handles user inputs, slash commands, local Gemma responses, Ctrl+C signals,
     and terminal edge cases with spooky flair. Guarantees that neither user
     input nor generated responses are ever executed as shell commands.
 
     Args:
         ui: Configured GhostUI renderer.
         handler: CommandHandler registry.
-        engine: PlaceholderEngine instance.
+        engine: Response engine (GemmaEngine or PlaceholderEngine).
 
     Returns:
         Process exit code (0 for clean termination).
@@ -129,6 +144,8 @@ def run_repl(ui: GhostUI, handler: CommandHandler, engine: PlaceholderEngine) ->
                     ui.render_single_help(result.data["doc"])
                 elif payload_type == "status":
                     ui.render_status(result.data["info"])
+                elif payload_type == "model_info":
+                    ui.render_model_info(result.data["info"])
                 elif payload_type == "about":
                     ui.render_about(result.data["content"])
                 else:
@@ -139,11 +156,19 @@ def run_repl(ui: GhostUI, handler: CommandHandler, engine: PlaceholderEngine) ->
 
             continue
 
-        # Non-command input: Route to the Placeholder Response Engine
+        # Non-command input: Route to GemmaEngine or PlaceholderEngine
         # STRICT SECURITY: Input is NEVER executed. Treated only as text prompt.
         try:
-            response = engine.process(stripped_input)
-            ui.render_placeholder_response(response)
+            with ui.status_spinner("👻 The machine ghost is stirring... Inscribing spectral response..."):
+                response = engine.process(stripped_input)
+
+            if response.mode == "GEMMA_LOCAL":
+                ui.render_gemma_response(response)
+            elif response.mode in ("SERVER_OFFLINE", "SERVER_ERROR"):
+                ui.render_model_offline(response)
+            else:
+                ui.render_placeholder_response(response)
+
         except Exception as exc:
             ui.render_error(f"Spectral disturbance during conduit reflection: {exc}")
 
@@ -162,10 +187,27 @@ def main() -> int:
     config = get_default_config()
     if args.no_animation:
         config.startup_animation = False
+    if args.endpoint:
+        config.model_endpoint = args.endpoint
+    if args.model:
+        config.model_name = args.model
+    if args.placeholder:
+        config.force_placeholder = True
+
+    # Setup client and engines
+    client = GemmaClient(
+        endpoint=config.model_endpoint,
+        model_name=config.model_name,
+        timeout=config.model_timeout,
+    )
+
+    if config.force_placeholder:
+        engine: BaseEngine = PlaceholderEngine()
+    else:
+        engine = GemmaEngine(client=client, config=config)
 
     ui = GhostUI(config=config)
-    handler = CommandHandler()
-    engine = PlaceholderEngine()
+    handler = CommandHandler(config=config, client=client)
 
     if args.diagnostics:
         status_res = handler.execute("/status")

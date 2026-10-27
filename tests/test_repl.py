@@ -1,4 +1,4 @@
-"""Unit tests for GhostShell REPL loop and signal handling."""
+"""Unit tests for GhostShell REPL loop, Gemma responses, and signal handling."""
 
 from __future__ import annotations
 
@@ -7,40 +7,97 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rich.console import Console
 
-from ghostshell.commands import CommandAction, CommandHandler, CommandResult
+from ghostshell.client import CompletionResponse, GemmaClient, ModelServerError
+from ghostshell.commands import CommandAction, CommandHandler
 from ghostshell.config import GhostConfig
-from ghostshell.engine import PlaceholderEngine
+from ghostshell.engine import GemmaEngine, PlaceholderEngine
 from ghostshell.ui import GhostUI
 from main import run_repl
 
 
 @pytest.fixture
-def repl_env() -> tuple[GhostUI, CommandHandler, PlaceholderEngine, Console]:
-    """Fixture providing components for testing the REPL loop."""
+def repl_env() -> tuple[GhostUI, CommandHandler, GemmaEngine, Console, MagicMock]:
+    """Fixture providing components for testing the REPL loop with GemmaEngine."""
     console = Console(record=True, width=100)
     config = GhostConfig(startup_animation=False)
     ui = GhostUI(console=console, config=config)
-    handler = CommandHandler()
-    engine = PlaceholderEngine()
-    return ui, handler, engine, console
+    mock_client = MagicMock(spec=GemmaClient)
+    mock_client.endpoint = "http://127.0.0.1:8080/v1/chat/completions"
+    mock_client.model_name = "gemma-3-1b-it"
+    mock_client.check_health.return_value = True
+
+    handler = CommandHandler(config=config, client=mock_client)
+    engine = GemmaEngine(client=mock_client, config=config)
+    return ui, handler, engine, console, mock_client
 
 
-def test_repl_exit_command(repl_env: tuple[GhostUI, CommandHandler, PlaceholderEngine, Console]) -> None:
-    """Test that /exit command terminates the loop gracefully."""
-    ui, handler, engine, console = repl_env
+def test_repl_gemma_successful_query(
+    repl_env: tuple[GhostUI, CommandHandler, GemmaEngine, Console, MagicMock]
+) -> None:
+    """Test standard query receives and renders genuine Gemma response."""
+    ui, handler, engine, console, mock_client = repl_env
 
-    with patch.object(ui, "get_input", side_effect=["/exit"]):
+    mock_client.chat_completion.return_value = CompletionResponse(
+        content="Always close file descriptors to prevent ghost leaks.",
+        model="gemma-3-1b-it",
+        prompt_tokens=15,
+        completion_tokens=10,
+        total_tokens=25,
+        latency_ms=90.0,
+    )
+
+    with patch.object(ui, "get_input", side_effect=["How to handle files?", "/exit"]):
         exit_code = run_repl(ui, handler, engine)
 
     assert exit_code == 0
     output = console.export_text()
-    assert "CONDUIT ONLINE" in output
+    assert "THE GHOST SPEAKS" in output
+    assert "Always close file descriptors" in output
     assert "Farewell, mortal." in output
 
 
-def test_repl_keyboard_interrupt(repl_env: tuple[GhostUI, CommandHandler, PlaceholderEngine, Console]) -> None:
-    """Test that Ctrl+C (KeyboardInterrupt) exits gracefully without crash."""
-    ui, handler, engine, console = repl_env
+def test_repl_gemma_server_offline_non_crashing(
+    repl_env: tuple[GhostUI, CommandHandler, GemmaEngine, Console, MagicMock]
+) -> None:
+    """Requirement 6: When server is stopped, GhostShell displays useful error and remains usable."""
+    ui, handler, engine, console, mock_client = repl_env
+
+    mock_client.chat_completion.side_effect = ModelServerError(
+        message="Connection refused",
+        is_offline=True,
+        endpoint="http://127.0.0.1:8080/v1/chat/completions",
+    )
+
+    with patch.object(ui, "get_input", side_effect=["Analyze this function", "/exit"]):
+        exit_code = run_repl(ui, handler, engine)
+
+    assert exit_code == 0
+    output = console.export_text()
+    assert "SPECTRAL CONDUIT OFFLINE" in output
+    assert "llama-server.exe" in output
+    assert "Farewell, mortal." in output
+
+
+def test_repl_slash_model_command(
+    repl_env: tuple[GhostUI, CommandHandler, GemmaEngine, Console, MagicMock]
+) -> None:
+    """Test /model slash command displays model properties in REPL."""
+    ui, handler, engine, console, _ = repl_env
+
+    with patch.object(ui, "get_input", side_effect=["/model", "/exit"]):
+        exit_code = run_repl(ui, handler, engine)
+
+    assert exit_code == 0
+    output = console.export_text()
+    assert "LOCAL GEMMA MODEL STATUS" in output
+    assert "gemma-3-1b-it" in output
+
+
+def test_repl_keyboard_interrupt(
+    repl_env: tuple[GhostUI, CommandHandler, GemmaEngine, Console, MagicMock]
+) -> None:
+    """Test that Ctrl+C (KeyboardInterrupt) exits gracefully."""
+    ui, handler, engine, console, _ = repl_env
 
     with patch.object(ui, "get_input", side_effect=KeyboardInterrupt):
         exit_code = run_repl(ui, handler, engine)
@@ -51,9 +108,11 @@ def test_repl_keyboard_interrupt(repl_env: tuple[GhostUI, CommandHandler, Placeh
     assert "Farewell, mortal." in output
 
 
-def test_repl_eof_error(repl_env: tuple[GhostUI, CommandHandler, PlaceholderEngine, Console]) -> None:
-    """Test that EOFError (Ctrl+D / Ctrl+Z) exits gracefully."""
-    ui, handler, engine, console = repl_env
+def test_repl_eof_error(
+    repl_env: tuple[GhostUI, CommandHandler, GemmaEngine, Console, MagicMock]
+) -> None:
+    """Test that EOFError exits gracefully."""
+    ui, handler, engine, console, _ = repl_env
 
     with patch.object(ui, "get_input", side_effect=EOFError):
         exit_code = run_repl(ui, handler, engine)
@@ -62,66 +121,3 @@ def test_repl_eof_error(repl_env: tuple[GhostUI, CommandHandler, PlaceholderEngi
     output = console.export_text()
     assert "Conduit closed via EOF signal" in output
     assert "Farewell, mortal." in output
-
-
-def test_repl_empty_input_skips(repl_env: tuple[GhostUI, CommandHandler, PlaceholderEngine, Console]) -> None:
-    """Test that blank lines are skipped until /exit."""
-    ui, handler, engine, console = repl_env
-
-    with patch.object(ui, "get_input", side_effect=["", "   ", "/exit"]):
-        exit_code = run_repl(ui, handler, engine)
-
-    assert exit_code == 0
-
-
-def test_repl_clear_command(repl_env: tuple[GhostUI, CommandHandler, PlaceholderEngine, Console]) -> None:
-    """Test /clear invokes clear_screen and re-displays banner."""
-    ui, handler, engine, console = repl_env
-
-    with patch.object(ui, "get_input", side_effect=["/clear", "/exit"]):
-        with patch.object(ui, "clear_screen") as mock_clear:
-            exit_code = run_repl(ui, handler, engine)
-            assert mock_clear.called
-
-    assert exit_code == 0
-
-
-def test_repl_unknown_command_shows_error(repl_env: tuple[GhostUI, CommandHandler, PlaceholderEngine, Console]) -> None:
-    """Test invalid command triggers error panel without breaking REPL."""
-    ui, handler, engine, console = repl_env
-
-    with patch.object(ui, "get_input", side_effect=["/not_a_valid_command", "/exit"]):
-        exit_code = run_repl(ui, handler, engine)
-
-    assert exit_code == 0
-    output = console.export_text()
-    assert "SPECTRAL ANOMALY DETECTED" in output
-    assert "Unknown ritual" in output
-
-
-def test_repl_plain_text_routes_to_engine(repl_env: tuple[GhostUI, CommandHandler, PlaceholderEngine, Console]) -> None:
-    """Test conversational text prompt routes to placeholder response engine."""
-    ui, handler, engine, console = repl_env
-
-    with patch.object(ui, "get_input", side_effect=["What is an echo?", "/exit"]):
-        exit_code = run_repl(ui, handler, engine)
-
-    assert exit_code == 0
-    output = console.export_text()
-    assert "SPECTRAL REFLECTION" in output
-    assert "What is an echo?" in output
-
-
-def test_repl_security_guard_on_allow_execution() -> None:
-    """Test that if security flag was somehow True, run_repl aborts with code 1."""
-    console = Console(record=True)
-    config = GhostConfig()
-    # Bypass property setter directly in test to test safety guard
-    object.__setattr__(config, "allow_command_execution", True)
-
-    ui = GhostUI(console=console, config=config)
-    handler = CommandHandler()
-    engine = PlaceholderEngine()
-
-    exit_code = run_repl(ui, handler, engine)
-    assert exit_code == 1

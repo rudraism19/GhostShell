@@ -1,8 +1,8 @@
-"""Spectral Response Engine for GhostShell.
+"""Spectral Response Engines for GhostShell.
 
-Provides a modular architecture for response generation. In Phase 1, the
-PlaceholderEngine operates in standalone UI development mode without an AI model,
-explicitly adhering to the constraint not to fabricate Gemma responses.
+Provides a modular architecture for response generation:
+- PlaceholderEngine: Phase 1 standalone UI development mode.
+- GemmaEngine: Phase 2 local-first neural inference connecting to a local llama.cpp server.
 """
 
 from __future__ import annotations
@@ -11,6 +11,9 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Final
+
+from ghostshell.client import GemmaClient, ModelServerError
+from ghostshell.config import DEFAULT_MODEL_ENDPOINT, DEFAULT_MODEL_NAME, DEFAULT_SYSTEM_PROMPT, GhostConfig
 
 # Known shell command prefixes to detect for proactive security notifications
 COMMON_SHELL_COMMANDS: Final[frozenset[str]] = frozenset(
@@ -29,12 +32,12 @@ class GhostResponse:
     Attributes:
         prompt: The raw user transmission received by the engine.
         content: The text payload to display.
-        mode: Operational mode ('UI_DEV_PLACEHOLDER' or 'GEMMA_LOCAL').
+        mode: Operational mode ('GEMMA_LOCAL', 'SERVER_OFFLINE', 'SERVER_ERROR', or 'UI_DEV_PLACEHOLDER').
         status: Engine readiness state.
         model_name: Name/status of the underlying model.
         char_count: Length of user prompt in characters.
         word_count: Number of words in user prompt.
-        estimated_tokens: Heuristic token count estimation.
+        estimated_tokens: Total token count (actual from server or estimated).
         latency_ms: Time in milliseconds to process the transmission.
         execution_sandboxed: Invariant confirming execution is disabled.
         metadata: Additional diagnostic or telemetry key-values.
@@ -101,21 +104,18 @@ class PlaceholderEngine(BaseEngine):
         char_count = len(cleaned_prompt)
         word_count = len(words)
 
-        # Heuristic estimation: ~1.3 tokens per word for English code/text
         estimated_tokens = max(1, int(word_count * 1.35)) if word_count > 0 else 0
 
-        # Check if the transmission resembles a shell command to inform the user
         first_word = words[0].lower() if words else ""
         shell_alert = first_word in COMMON_SHELL_COMMANDS
 
-        # Explicit UI Dev mode payload — never feigns being an actual Gemma response
         explanation = (
             "Spectral transmission received through the machine conduit.\n\n"
             "[bold #00FF66]UI Development Mode Active:[/bold #00FF66] The local Gemma neural engine "
-            "is currently detached during Phase 1 UI engineering. Your query has been parsed and "
+            "is currently detached during UI engineering. Your query has been parsed and "
             "verified against spectral containment rules.\n\n"
-            "In Phase 2, this channel will connect to an on-device quantized Gemma model "
-            "for haunted code analysis, Git commentary, and terminal debugging."
+            "In Phase 2, this channel connects to an on-device quantized Gemma 3 1B model "
+            "running on llama.cpp for haunted code analysis, Git commentary, and terminal debugging."
         )
 
         if shell_alert:
@@ -131,7 +131,7 @@ class PlaceholderEngine(BaseEngine):
             "engine_id": self.engine_id,
             "shell_prefix_detected": shell_alert,
             "security_lock": "ACTIVE",
-            "phase": "Phase 1 - Terminal UI & Control",
+            "phase": "Phase 1 - Standalone UI Mode",
         }
 
         return GhostResponse(
@@ -139,7 +139,7 @@ class PlaceholderEngine(BaseEngine):
             content=explanation,
             mode="UI_DEV_PLACEHOLDER",
             status="RECEPTIVE_STANDALONE",
-            model_name="Detached (Phase 1 UI Mode)",
+            model_name="Detached (UI Dev Mode)",
             char_count=char_count,
             word_count=word_count,
             estimated_tokens=estimated_tokens,
@@ -147,3 +147,114 @@ class PlaceholderEngine(BaseEngine):
             execution_sandboxed=True,
             metadata=metadata,
         )
+
+
+class GemmaEngine(BaseEngine):
+    """Phase 2 local Gemma response engine.
+
+    Connects to an on-device llama.cpp server hosting Gemma 3 1B Instruct GGUF.
+    Enforces local-only inference and handles offline server states gracefully.
+    """
+
+    def __init__(
+        self,
+        client: GemmaClient | None = None,
+        config: GhostConfig | None = None,
+    ) -> None:
+        """Initialize the Gemma engine.
+
+        Args:
+            client: Configured GemmaClient instance.
+            config: GhostConfig instance.
+        """
+        self.config = config or GhostConfig()
+        self.client = client or GemmaClient(
+            endpoint=self.config.model_endpoint,
+            model_name=self.config.model_name,
+            timeout=self.config.model_timeout,
+        )
+        self.system_prompt = self.config.model_system_prompt or DEFAULT_SYSTEM_PROMPT
+
+    def process(self, prompt: str) -> GhostResponse:
+        """Send prompt to local Gemma and return structured response.
+
+        If the local server is unavailable, returns a structured offline response
+        with startup instructions without crashing.
+
+        Args:
+            prompt: Text sent by the user.
+
+        Returns:
+            GhostResponse with either genuine Gemma text or offline instructions.
+        """
+        cleaned_prompt = prompt.strip()
+        words = cleaned_prompt.split()
+        char_count = len(cleaned_prompt)
+        word_count = len(words)
+
+        first_word = words[0].lower() if words else ""
+        shell_alert = first_word in COMMON_SHELL_COMMANDS
+
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": cleaned_prompt},
+        ]
+
+        try:
+            comp = self.client.chat_completion(messages)
+
+            content = comp.content
+            if shell_alert:
+                content += (
+                    f"\n\n[dim #FFB000]⚠ Security Notice: Input matched shell prefix '{first_word}'. "
+                    f"Command execution is strictly disabled; suggestions are text-only.[/dim #FFB000]"
+                )
+
+            return GhostResponse(
+                prompt=cleaned_prompt,
+                content=content,
+                mode="GEMMA_LOCAL",
+                status="ONLINE_BOUND",
+                model_name=f"Gemma 3 1B ({comp.model})",
+                char_count=char_count,
+                word_count=word_count,
+                estimated_tokens=comp.total_tokens,
+                latency_ms=comp.latency_ms,
+                execution_sandboxed=True,
+                metadata={
+                    "prompt_tokens": comp.prompt_tokens,
+                    "completion_tokens": comp.completion_tokens,
+                    "endpoint": self.client.endpoint,
+                    "shell_prefix_detected": shell_alert,
+                },
+            )
+
+        except ModelServerError as err:
+            instructions = (
+                f"[bold #FF3366]Spectral Conduit Severed:[/bold #FF3366] Could not reach the local Gemma server.\n"
+                f"• [bold #00F0FF]Target Endpoint:[/] {err.endpoint}\n\n"
+                f"[bold #00FF66]To awaken the Gemma 3 1B Ghost on Windows PowerShell:[/bold #00FF66]\n"
+                f"1. Download [bold #39FF14]gemma-3-1b-it-Q4_K_M.gguf[/] into a [bold]models/[/] folder.\n"
+                f"2. Launch llama.cpp server in a separate terminal:\n"
+                f"   [bold #00F0FF]llama-server.exe -m models/gemma-3-1b-it-Q4_K_M.gguf --port 8080 -c 2048[/]\n"
+                f"3. Return here and submit your question again.\n\n"
+                f"[dim]GhostShell remains fully usable. Type /help to see rites or /status to check conduit health.[/dim]"
+            )
+
+            return GhostResponse(
+                prompt=cleaned_prompt,
+                content=instructions,
+                mode="SERVER_OFFLINE" if err.is_offline else "SERVER_ERROR",
+                status="CONDUIT_SEVERED",
+                model_name=f"Offline ({self.client.model_name})",
+                char_count=char_count,
+                word_count=word_count,
+                estimated_tokens=0,
+                latency_ms=0.0,
+                execution_sandboxed=True,
+                metadata={
+                    "error": err.message,
+                    "endpoint": self.client.endpoint,
+                    "is_offline": err.is_offline,
+                },
+            )

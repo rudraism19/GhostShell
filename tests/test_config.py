@@ -8,6 +8,8 @@ from rich.console import Console
 
 from ghostshell.config import (
     ALLOW_COMMAND_EXECUTION,
+    DEFAULT_MODEL_ENDPOINT,
+    DEFAULT_MODEL_NAME,
     PHOSPHOR_BRIGHT,
     PHOSPHOR_GREEN,
     SPECTRAL_CYAN,
@@ -21,9 +23,11 @@ def test_default_config() -> None:
     """Verify default configuration attributes and security settings."""
     config = get_default_config()
     assert config.app_name == "GhostShell"
-    assert config.version == "0.1.0"
+    assert config.version == "0.2.0"
     assert config.allow_command_execution is False
     assert config.startup_animation is True
+    assert config.model_endpoint == DEFAULT_MODEL_ENDPOINT
+    assert config.model_name == DEFAULT_MODEL_NAME
     assert "ghostshell" in config.prompt_text
 
 
@@ -37,6 +41,18 @@ def test_security_invariant_immutable() -> None:
 
     assert config.allow_command_execution is False
     assert ALLOW_COMMAND_EXECUTION is False
+
+
+def test_model_config_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify environment variables override model settings."""
+    monkeypatch.setenv("GHOSTSHELL_MODEL_ENDPOINT", "http://127.0.0.1:9999/v1/chat/completions")
+    monkeypatch.setenv("GHOSTSHELL_MODEL_NAME", "custom-gemma-3")
+    monkeypatch.setenv("GHOSTSHELL_MODEL_TIMEOUT", "60.0")
+
+    config = get_default_config()
+    assert config.model_endpoint == "http://127.0.0.1:9999/v1/chat/completions"
+    assert config.model_name == "custom-gemma-3"
+    assert config.model_timeout == 60.0
 
 
 def test_no_animation_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -58,7 +74,6 @@ def test_create_console() -> None:
     """Verify console creation and theme binding."""
     console = create_console()
     assert isinstance(console, Console)
-    # Check that custom styles resolve in console
     assert str(console.get_style("ghost.primary")) == "bold #00ff66"
     assert "bold" in str(console.get_style("ghost.bright"))
     assert "bold" in str(console.get_style("ghost.error"))

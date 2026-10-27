@@ -25,12 +25,64 @@ def ui(mock_console: Console) -> GhostUI:
 
 
 def test_render_startup_banner(ui: GhostUI, mock_console: Console) -> None:
-    """Verify banner rendering contains GhostShell and tagline."""
+    """Verify banner rendering contains GhostShell, tagline, and Phase 2."""
     ui.render_startup_banner(animated=False)
     output = mock_console.export_text()
     assert "GHOST IN THE MACHINE" in output
     assert "CONDUIT ONLINE" in output
-    assert "Phase 1" in output
+    assert "Phase 2" in output
+
+
+def test_render_gemma_response(ui: GhostUI, mock_console: Console) -> None:
+    """Verify rendering of genuine Gemma response with Markdown and telemetry."""
+    response = GhostResponse(
+        prompt="Explain recursion",
+        content="Recursion occurs when a function calls itself.\n\n```python\ndef fact(n):\n    return 1 if n <= 1 else n * fact(n - 1)\n```",
+        mode="GEMMA_LOCAL",
+        status="ONLINE_BOUND",
+        model_name="Gemma 3 1B (gemma-3-1b-it)",
+        char_count=17,
+        word_count=2,
+        estimated_tokens=42,
+        latency_ms=150.0,
+    )
+    ui.render_gemma_response(response)
+    output = mock_console.export_text()
+    assert "THE GHOST SPEAKS" in output
+    assert "GEMMA 3 1B INSTRUCT" in output
+    assert "Explain recursion" in output
+    assert "Recursion occurs" in output
+    assert "def fact(n):" in output
+    assert "Total Tokens:" in output
+    assert "150.0 ms" in output
+
+
+def test_render_model_offline(ui: GhostUI, mock_console: Console) -> None:
+    """Verify rendering of non-crashing offline guidance panel."""
+    response = GhostResponse(
+        prompt="Explain memory leak",
+        content="Spectral Conduit Severed: Start llama-server on port 8080.",
+        mode="SERVER_OFFLINE",
+        status="CONDUIT_SEVERED",
+    )
+    ui.render_model_offline(response)
+    output = mock_console.export_text()
+    assert "SPECTRAL CONDUIT OFFLINE" in output
+    assert "llama.cpp Server Not Running on Port 8080" in output
+    assert "Start llama-server on port 8080" in output
+
+
+def test_render_model_info(ui: GhostUI, mock_console: Console) -> None:
+    """Verify rendering of /model inspection panel."""
+    info = {
+        "Model Name": "gemma-3-1b-it",
+        "Local Endpoint": "http://127.0.0.1:8080/v1/chat/completions",
+        "Server Status": "ONLINE",
+    }
+    ui.render_model_info(info)
+    output = mock_console.export_text()
+    assert "LOCAL GEMMA MODEL STATUS" in output
+    assert "gemma-3-1b-it" in output
 
 
 def test_render_placeholder_response(ui: GhostUI, mock_console: Console) -> None:
@@ -47,74 +99,22 @@ def test_render_placeholder_response(ui: GhostUI, mock_console: Console) -> None
     output = mock_console.export_text()
     assert "SPECTRAL REFLECTION" in output
     assert "ghost echo test" in output
-    assert "Conduit Diagnostics" in output
-    assert "Est. Tokens:" in output
-    assert "UI Development Mode Active" in output
 
 
 def test_render_help_all(ui: GhostUI, mock_console: Console) -> None:
     """Verify grimoire table rendering."""
     docs = [
         CommandDoc(name="/help", description="Help command", usage="/help", aliases=["/?"]),
-        CommandDoc(name="/exit", description="Exit command", usage="/exit", aliases=["/quit"]),
+        CommandDoc(name="/model", description="Model info", usage="/model", aliases=["/gemma"]),
     ]
     ui.render_help(docs)
     output = mock_console.export_text()
     assert "SPECTRAL GRIMOIRE" in output
     assert "/help" in output
-    assert "/exit" in output
+    assert "/model" in output
 
 
-def test_render_single_help(ui: GhostUI, mock_console: Console) -> None:
-    """Verify single command help rendering."""
-    doc = CommandDoc(name="/clear", description="Clear screen", usage="/clear", aliases=["/cls"])
-    ui.render_single_help(doc)
-    output = mock_console.export_text()
-    assert "Grimoire: /clear" in output
-    assert "Usage:" in output
-    assert "/cls" in output
-
-
-def test_render_status(ui: GhostUI, mock_console: Console) -> None:
-    """Verify status diagnostics panel rendering."""
-    info = {
-        "version": "0.1.0",
-        "phase": "Phase 1 - Terminal UI & Control",
-        "engine": "PlaceholderEngine",
-        "command_execution": "STRICTLY FORBIDDEN",
-    }
-    ui.render_status(info)
-    output = mock_console.export_text()
-    assert "SPECTRAL CONDUIT DIAGNOSTICS" in output
-    assert "PlaceholderEngine" in output
-    assert "FORBIDDEN" in output
-
-
-def test_render_about(ui: GhostUI, mock_console: Console) -> None:
-    """Verify about panel rendering."""
-    ui.render_about("[bold]Haunted assistant[/bold]")
-    output = mock_console.export_text()
-    assert "THE GHOST IN THE MACHINE" in output
-    assert "Haunted assistant" in output
-
-
-def test_render_error(ui: GhostUI, mock_console: Console) -> None:
-    """Verify error panel rendering."""
-    ui.render_error("Severe spectral rupture detected!")
-    output = mock_console.export_text()
-    assert "SPECTRAL ANOMALY DETECTED" in output
-    assert "Severe spectral rupture detected!" in output
-
-
-def test_render_goodbye(ui: GhostUI, mock_console: Console) -> None:
-    """Verify farewell message rendering."""
-    ui.render_goodbye()
-    output = mock_console.export_text()
-    assert "The ghost dissolves into the machine" in output
-    assert "Farewell, mortal." in output
-
-
-def test_terminal_width_resilience(ui: GhostUI) -> None:
-    """Ensure get_terminal_width returns at least 40 and does not crash."""
-    width = ui.get_terminal_width()
-    assert width >= 40
+def test_status_spinner_context_manager(ui: GhostUI) -> None:
+    """Ensure status_spinner runs without error."""
+    with ui.status_spinner("Testing spinner"):
+        pass

@@ -8,18 +8,21 @@ from __future__ import annotations
 
 import sys
 import time
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from rich import box
 from rich.console import Console, Group
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
 from ghostshell.commands import CommandDoc
 from ghostshell.config import (
-    ECTO_AMBER,
     CRIMSON_GLITCH,
+    DARK_BG,
+    ECTO_AMBER,
     GHOST_MIST,
     PHANTOM_DEEP,
     PHANTOM_DIM,
@@ -79,6 +82,22 @@ class GhostUI:
         """Clear the console screen cleanly across all operating systems."""
         self.console.clear()
 
+    @contextmanager
+    def status_spinner(
+        self,
+        message: str = "👻 The machine ghost is stirring... Inscribing spectral response...",
+    ) -> Iterator[None]:
+        """Display a ghostly phosphor spinner while waiting for model inference.
+
+        Args:
+            message: Spooky status message to display.
+        """
+        if sys.stdout.isatty():
+            with self.console.status(f"[bold {PHOSPHOR_BRIGHT}]{message}[/]", spinner="dots", spinner_style=SPECTRAL_CYAN):
+                yield
+        else:
+            yield
+
     def render_startup_banner(self, animated: bool | None = None) -> None:
         """Display the haunted CRT boot sequence and ASCII banner.
 
@@ -133,7 +152,7 @@ class GhostUI:
             box=box.DOUBLE,
             border_style=PHOSPHOR_GREEN,
             title=f"[bold {SPECTRAL_CYAN}]👻 CONDUIT ONLINE 👻[/]",
-            subtitle=f"[{PHANTOM_DIM}]Phase 1: Terminal Control & UI[/]",
+            subtitle=f"[{PHANTOM_DIM}]Phase 2: Local Gemma 3 1B Integration[/]",
             padding=(1, 2),
         )
 
@@ -151,16 +170,101 @@ class GhostUI:
         except (KeyboardInterrupt, EOFError):
             raise
 
+    def render_gemma_response(self, response: GhostResponse) -> None:
+        """Render a genuine response from the local Gemma model.
+
+        Displays the AI text/markdown, tokens consumed, latency, and
+        confirms that command execution is strictly sandboxed.
+
+        Args:
+            response: GhostResponse containing Gemma's generated content.
+        """
+        # Diagnostic Telemetry Table
+        diag_table = Table(
+            box=box.MINIMAL,
+            show_header=False,
+            padding=(0, 1),
+            border_style=PHANTOM_DIM,
+        )
+        diag_table.add_column("Key1", style=f"bold {SPECTRAL_CYAN}")
+        diag_table.add_column("Val1", style=f"{GHOST_MIST}")
+        diag_table.add_column("Key2", style=f"bold {SPECTRAL_CYAN}")
+        diag_table.add_column("Val2", style=f"{GHOST_MIST}")
+
+        diag_table.add_row(
+            "Spectral Model:",
+            f"[{PHOSPHOR_BRIGHT}]{response.model_name}[/]",
+            "Total Tokens:",
+            f"[{PHOSPHOR_GREEN}]{response.estimated_tokens}[/]",
+        )
+        diag_table.add_row(
+            "Latency:",
+            f"{response.latency_ms:.1f} ms",
+            "Security Lock:",
+            f"[{PHOSPHOR_GREEN}]SECURE (EXECUTION FORBIDDEN)[/]",
+        )
+
+        # Transmission Echo Panel
+        echo_text = Text(f'"{response.prompt}"', style=f"italic {GHOST_MIST}")
+        echo_panel = Panel(
+            echo_text,
+            box=box.ROUNDED,
+            border_style=PHANTOM_DIM,
+            title=f"[{PHOSPHOR_GREEN}]Transmission Query[/]",
+            padding=(0, 1),
+        )
+
+        # Render Markdown body from Gemma
+        body_renderable = Markdown(response.content)
+
+        content_group = Group(
+            echo_panel,
+            Text(""),
+            body_renderable,
+            Text(""),
+            Panel(
+                diag_table,
+                title=f"[{SPECTRAL_CYAN}]Local Inference Telemetry[/]",
+                box=box.HORIZONTALS,
+                border_style=PHANTOM_DEEP,
+            ),
+        )
+
+        panel = Panel(
+            content_group,
+            box=box.ROUNDED,
+            border_style=PHOSPHOR_GREEN,
+            title=f"[bold {PHOSPHOR_BRIGHT}]👻 THE GHOST SPEAKS [GEMMA 3 1B INSTRUCT][/]",
+            subtitle=f"[{PHANTOM_DIM}]Local llama.cpp Engine • 100% Private[/]",
+            padding=(1, 2),
+        )
+
+        self.console.print(panel)
+        self.console.print()
+
+    def render_model_offline(self, response: GhostResponse) -> None:
+        """Render a non-crashing guidance panel when the model server is offline.
+
+        Args:
+            response: GhostResponse containing offline instructions.
+        """
+        panel = Panel(
+            Text.from_markup(response.content),
+            box=box.HEAVY,
+            border_style=ECTO_AMBER,
+            title=f"[bold {CRIMSON_GLITCH}]⚠️  SPECTRAL CONDUIT OFFLINE[/]",
+            subtitle=f"[{ECTO_AMBER}]llama.cpp Server Not Running on Port 8080[/]",
+            padding=(1, 2),
+        )
+        self.console.print(panel)
+        self.console.print()
+
     def render_placeholder_response(self, response: GhostResponse) -> None:
         """Render a spectral reflection panel for Phase 1 UI mode.
-
-        Explicitly reflects the user transmission and telemetry without
-        impersonating Gemma.
 
         Args:
             response: GhostResponse containing echo data and diagnostics.
         """
-        # Diagnostic Telemetry Table
         diag_table = Table(
             box=box.MINIMAL,
             show_header=False,
@@ -191,7 +295,6 @@ class GhostUI:
             f"[{PHOSPHOR_GREEN}]LOCKED (ALLOW_EXECUTION=False)[/]",
         )
 
-        # Transmission Echo Box
         echo_text = Text(f'"{response.prompt}"', style=f"italic {GHOST_MIST}")
         echo_panel = Panel(
             echo_text,
@@ -201,7 +304,6 @@ class GhostUI:
             padding=(0, 1),
         )
 
-        # Explanation Body
         body_text = Text.from_markup(response.content)
 
         content_group = Group(
@@ -222,7 +324,7 @@ class GhostUI:
             box=box.ROUNDED,
             border_style=PHOSPHOR_GREEN,
             title=f"[bold {PHOSPHOR_BRIGHT}]👻 SPECTRAL REFLECTION [UI DEV MODE][/]",
-            subtitle=f"[{PHANTOM_DIM}]Local Gemma LLM Binding in Phase 2[/]",
+            subtitle=f"[{PHANTOM_DIM}]Local Gemma LLM Integration Available[/]",
             padding=(1, 2),
         )
 
@@ -303,8 +405,10 @@ class GhostUI:
         for key, val in info.items():
             label = key.replace("_", " ").title()
             val_str = str(val)
-            if "FORBIDDEN" in val_str or "ACTIVE" in val_str or "Ready" in val_str:
+            if "FORBIDDEN" in val_str or "ACTIVE" in val_str or "ONLINE" in val_str or "Ready" in val_str:
                 val_markup = f"[bold {PHOSPHOR_BRIGHT}]✔ {val_str}[/]"
+            elif "OFFLINE" in val_str or "SEVERED" in val_str:
+                val_markup = f"[bold {CRIMSON_GLITCH}]✖ {val_str}[/]"
             else:
                 val_markup = val_str
             table.add_row(label, val_markup)
@@ -315,6 +419,35 @@ class GhostUI:
             border_style=PHOSPHOR_GREEN,
             title=f"[bold {PHOSPHOR_BRIGHT}]🔮 SPECTRAL CONDUIT DIAGNOSTICS[/]",
             subtitle=f"[{PHANTOM_DIM}]GhostShell Status Check[/]",
+            padding=(1, 1),
+        )
+        self.console.print(panel)
+        self.console.print()
+
+    def render_model_info(self, info: dict[str, Any]) -> None:
+        """Render model configuration and health info panel.
+
+        Args:
+            info: Dictionary containing model settings and connection status.
+        """
+        table = Table(
+            box=box.ROUNDED,
+            border_style=SPECTRAL_CYAN,
+            header_style=f"bold {PHOSPHOR_BRIGHT}",
+            padding=(0, 2),
+        )
+        table.add_column("Property", style=f"bold {SPECTRAL_CYAN}", min_width=18)
+        table.add_column("Configuration", style=f"{GHOST_MIST}")
+
+        for key, val in info.items():
+            table.add_row(key, str(val))
+
+        panel = Panel(
+            table,
+            box=box.DOUBLE,
+            border_style=SPECTRAL_CYAN,
+            title=f"[bold {PHOSPHOR_BRIGHT}]🧠 LOCAL GEMMA MODEL STATUS[/]",
+            subtitle=f"[{PHANTOM_DIM}]OpenAI-Compatible Local Endpoint[/]",
             padding=(1, 1),
         )
         self.console.print(panel)

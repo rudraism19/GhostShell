@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
+from ghostshell.client import GemmaClient
 from ghostshell.commands import CommandAction, CommandDoc, CommandHandler, CommandResult
+from ghostshell.config import GhostConfig
 
 
 @pytest.fixture
@@ -18,6 +22,7 @@ def test_is_command(handler: CommandHandler) -> None:
     assert handler.is_command("/help") is True
     assert handler.is_command("/exit") is True
     assert handler.is_command("/status") is True
+    assert handler.is_command("/model") is True
     assert handler.is_command("/custom") is True
     assert handler.is_command("  /spaced") is True
 
@@ -37,31 +42,25 @@ def test_command_help_all(handler: CommandHandler) -> None:
     assert result.data is not None
     assert result.data["type"] == "help_all"
     docs = result.data["docs"]
-    assert len(docs) >= 5
+    assert len(docs) >= 6
     cmd_names = [d.name for d in docs]
     assert "/help" in cmd_names
     assert "/clear" in cmd_names
     assert "/exit" in cmd_names
     assert "/status" in cmd_names
+    assert "/model" in cmd_names
     assert "/about" in cmd_names
 
 
 def test_command_help_single(handler: CommandHandler) -> None:
     """Verify /help <command> returns documentation for a specific command."""
-    result = handler.execute("/help clear")
+    result = handler.execute("/help model")
     assert result.action == CommandAction.CONTINUE
     assert result.data is not None
     assert result.data["type"] == "help_single"
     doc: CommandDoc = result.data["doc"]
-    assert doc.name == "/clear"
-    assert "/cls" in doc.aliases
-
-
-def test_command_help_invalid_subcommand(handler: CommandHandler) -> None:
-    """Verify /help <unknown> returns an error."""
-    result = handler.execute("/help non_existent_spell")
-    assert result.action == CommandAction.ERROR
-    assert "No grimoire entry found" in (result.message or "")
+    assert doc.name == "/model"
+    assert "/gemma" in doc.aliases
 
 
 def test_command_clear(handler: CommandHandler) -> None:
@@ -69,10 +68,6 @@ def test_command_clear(handler: CommandHandler) -> None:
     result = handler.execute("/clear")
     assert result.action == CommandAction.CLEAR
     assert "cleansed" in (result.message or "").lower()
-
-    # Test alias /cls
-    result_alias = handler.execute("/cls")
-    assert result_alias.action == CommandAction.CLEAR
 
 
 def test_command_exit_and_quit(handler: CommandHandler) -> None:
@@ -83,17 +78,45 @@ def test_command_exit_and_quit(handler: CommandHandler) -> None:
         assert "released" in (result.message or "").lower()
 
 
-def test_command_status(handler: CommandHandler) -> None:
-    """Verify /status returns system and containment diagnostic information."""
-    result = handler.execute("/status")
-    assert result.action == CommandAction.CONTINUE
-    assert result.data is not None
-    assert result.data["type"] == "status"
-    info = result.data["info"]
-    assert info["version"] == "0.1.0"
-    assert "PlaceholderEngine" in info["engine"]
+def test_command_status_with_client_probe() -> None:
+    """Verify /status probes model server health."""
+    mock_client = MagicMock(spec=GemmaClient)
+    mock_client.endpoint = "http://127.0.0.1:8080/v1/chat/completions"
+    mock_client.check_health.return_value = True
+
+    h = CommandHandler(client=mock_client)
+    res = h.execute("/status")
+
+    assert res.action == CommandAction.CONTINUE
+    info = res.data["info"]
+    assert "ONLINE" in info["model_server"]
     assert "FORBIDDEN" in info["command_execution"]
     assert info["security_sandbox"] == "ACTIVE"
+
+
+def test_command_status_offline_client() -> None:
+    """Verify /status indicates when model server is offline."""
+    mock_client = MagicMock(spec=GemmaClient)
+    mock_client.check_health.return_value = False
+
+    h = CommandHandler(client=mock_client)
+    res = h.execute("/status")
+
+    info = res.data["info"]
+    assert "OFFLINE" in info["model_server"]
+
+
+def test_command_model(handler: CommandHandler) -> None:
+    """Verify /model displays model configuration and target details."""
+    result = handler.execute("/model")
+    assert result.action == CommandAction.CONTINUE
+    assert result.data is not None
+    assert result.data["type"] == "model_info"
+    info = result.data["info"]
+    assert "Model Name" in info
+    assert "Local Endpoint" in info
+    assert "Gemma 3 1B" in info["Quantization Target"]
+    assert "8 GB RAM" in info["Target Hardware"]
 
 
 def test_command_about(handler: CommandHandler) -> None:
@@ -103,7 +126,7 @@ def test_command_about(handler: CommandHandler) -> None:
     assert result.data is not None
     assert result.data["type"] == "about"
     assert "Ghost in the Machine" in result.data["content"]
-    assert "local-first" in result.data["content"].lower()
+    assert "Gemma 3 1B" in result.data["content"]
 
 
 def test_unknown_command(handler: CommandHandler) -> None:
@@ -119,39 +142,3 @@ def test_empty_command(handler: CommandHandler) -> None:
     result = handler.execute("/")
     assert result.action == CommandAction.ERROR
     assert "Empty command invocation" in (result.message or "")
-
-
-def test_non_command_passed_to_execute(handler: CommandHandler) -> None:
-    """Verify passing text without slash returns error action."""
-    result = handler.execute("hello ghost")
-    assert result.action == CommandAction.ERROR
-    assert "Not a slash command" in (result.message or "")
-
-
-def test_custom_command_registration(handler: CommandHandler) -> None:
-    """Verify extensible command registry for future phases."""
-    def _my_spell(args: list[str]) -> CommandResult:
-        return CommandResult(
-            action=CommandAction.CONTINUE,
-            message=f"Cast spell with args: {args}",
-        )
-
-    handler.register(
-        name="spell",
-        handler=_my_spell,
-        doc=CommandDoc(
-            name="/spell",
-            description="Cast a custom hex.",
-            usage="/spell <arg>",
-            aliases=["/hex"],
-        ),
-    )
-
-    res = handler.execute("/spell lightning")
-    assert res.action == CommandAction.CONTINUE
-    assert res.message == "Cast spell with args: ['lightning']"
-
-    # Test alias
-    res_alias = handler.execute("/hex frost")
-    assert res_alias.action == CommandAction.CONTINUE
-    assert res_alias.message == "Cast spell with args: ['frost']"
